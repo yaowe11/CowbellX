@@ -1,15 +1,19 @@
 #import <UIKit/UIKit.h>
-#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
-@interface CAStateController : NSObject
-- (void)setState:(id)state ofLayer:(CALayer *)layer transitionSpeed:(float)speed transitionDuration:(double)duration;
+// 声明系统私有的状态栏电池 View
+@interface _UIBatteryView : UIView
+@property (nonatomic, assign) NSInteger chargeState;
+@property (nonatomic, assign) CGFloat chargePercent;
+@property (nonatomic, assign) BOOL saverModeActive;
+@property (nonatomic, assign) BOOL showsInlineChargingIndicator;
+- (instancetype)initWithSizeCategory:(NSInteger)category;
+- (void)setChargePercent:(CGFloat)chargePercent;
 @end
 
-@interface CCUICAPackageView : UIView
-@property (nonatomic, strong) CAStateController *stateController;
-- (BOOL)cb_isLowPowerPackage;
-- (void)cb_updateStateProgress;
+@interface CCUIRoundButton : UIView
+@property (nonatomic, strong) _UIBatteryView *cbBatteryView;
+- (BOOL)cb_isLowPowerButton;
 @end
 
 @interface CCUIContentModuleContainerView : UIView
@@ -19,28 +23,62 @@
 - (BOOL)cb_isLowPowerModule;
 @end
 
-#pragma mark - 1. 控制 CAStateController 动画进度（平滑改变内部填充）
+#pragma mark - 1. 用系统原生 _UIBatteryView 精准替换按钮图标
 
-%hook CCUICAPackageView
+%hook CCUIRoundButton
+
+%property (nonatomic, strong) _UIBatteryView *cbBatteryView;
 
 - (void)layoutSubviews {
     %orig;
 
-    if ([self cb_isLowPowerPackage]) {
-        [self cb_updateStateProgress];
+    if (![self cb_isLowPowerButton]) return;
+
+    // 1. 隐藏按钮内部原生的 Package 矢量控件，防止盖住
+    for (UIView *sub in self.subviews) {
+        if (sub != self.cbBatteryView) {
+            sub.hidden = YES;
+        }
     }
-}
 
-- (void)setStateName:(NSString *)stateName {
-    %orig;
+    // 2. 初始化并注入系统的 _UIBatteryView
+    if (!self.cbBatteryView) {
+        Class batClass = NSClassFromString(@"_UIBatteryView");
+        if (batClass) {
+            // category 0 为标准尺寸
+            _UIBatteryView *bat = [[batClass alloc] initWithSizeCategory:0];
+            bat.userInteractionEnabled = NO;
 
-    if ([self cb_isLowPowerPackage]) {
-        [self cb_updateStateProgress];
+            // 放大 1.4 倍以匹配控制中心的大按钮
+            bat.bounds = CGRectMake(0, 0, 24, 12);
+            bat.transform = CGAffineTransformMakeScale(1.4, 1.4);
+
+            self.cbBatteryView = bat;
+            [self addSubview:bat];
+        }
+    }
+
+    // 3. 居中定位与动态刷新电量
+    if (self.cbBatteryView) {
+        self.cbBatteryView.center = CGPointMake(self.bounds.size.width / 2.0, self.bounds.size.height / 2.0 - 5);
+        [self bringSubviewToFront:self.cbBatteryView];
+
+        [UIDevice currentDevice].batteryMonitoringEnabled = YES;
+        float level = [UIDevice currentDevice].batteryLevel;
+        if (level < 0) level = 1.0f;
+
+        // 强行传值：精确拉动电池内部填充条缩放 (0.00 ~ 1.00)
+        [self.cbBatteryView setChargePercent:level];
+
+        BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
+        if ([self.cbBatteryView respondsToSelector:@selector(setSaverModeActive:)]) {
+            [self.cbBatteryView setSaverModeActive:isLowPower];
+        }
     }
 }
 
 %new
-- (BOOL)cb_isLowPowerPackage {
+- (BOOL)cb_isLowPowerButton {
     UIResponder *responder = self;
     while (responder) {
         NSString *clsName = NSStringFromClass([responder class]);
@@ -52,49 +90,9 @@
     return NO;
 }
 
-%new
-- (void)cb_updateStateProgress {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [UIDevice currentDevice].batteryMonitoringEnabled = YES;
-        float level = [UIDevice currentDevice].batteryLevel;
-        if (level < 0) level = 1.0f;
-
-        // 清理之前残留的 mask（防止之前代码的影响）
-        if (self.layer.mask) {
-            self.layer.mask = nil;
-        }
-
-        // 遍历 Package 内部所有的 CALayer 动画，定位关键帧动画并控制 timeOffset
-        NSMutableArray *queue = [NSMutableArray arrayWithObject:self.layer];
-        while (queue.count > 0) {
-            CALayer *ly = [queue firstObject];
-            [queue removeObjectAtIndex:0];
-
-            // 如果该图层包含 Key 动画
-            NSArray *animationKeys = [ly animationKeys];
-            if (animationKeys.count > 0) {
-                for (NSString *key in animationKeys) {
-                    CAAnimation *anim = [ly animationForKey:key];
-                    if (anim) {
-                        // 暂停当前 layer 自动播放，手动调整时间偏移量
-                        ly.speed = 0.0;
-                        CFTimeInterval duration = anim.duration > 0 ? anim.duration : 1.0;
-                        // 将 batteryLevel (0.0~1.0) 映射到关键帧动画时间点
-                        ly.timeOffset = level * duration;
-                    }
-                }
-            }
-
-            if (ly.sublayers.count > 0) {
-                [queue addObjectsFromArray:ly.sublayers];
-            }
-        }
-    });
-}
-
 %end
 
-#pragma mark - 2. 底部百分比 Label
+#pragma mark - 2. 底部 81% 文本显示
 
 %hook CCUIContentModuleContainerView
 
@@ -113,7 +111,7 @@
     if (width <= 0 || height <= 0 || width > 100 || height > 100) return;
 
     if (!self.cbPercentLabel) {
-        UILabel *lab = [[UILabel alloc] initWithFrame:CGRectMake(0, height - 18, width, 12)];
+        UILabel *lab = [[UILabel alloc] initWithFrame:CGRectMake(0, height - 16, width, 12)];
         lab.font = [UIFont systemFontOfSize:10 weight:UIFontWeightBold];
         lab.textAlignment = NSTextAlignmentCenter;
         lab.userInteractionEnabled = NO;
@@ -134,7 +132,7 @@
                                                    object:nil];
     } else {
         self.cbPercentLabel.hidden = NO;
-        self.cbPercentLabel.frame = CGRectMake(0, height - 18, width, 12);
+        self.cbPercentLabel.frame = CGRectMake(0, height - 16, width, 12);
     }
 
     [self bringSubviewToFront:self.cbPercentLabel];
