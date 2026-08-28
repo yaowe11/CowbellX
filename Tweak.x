@@ -1,7 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-#pragma mark - 1. Cowbell 1:1 贝塞尔绘制电池 View
+#pragma mark - 1. Cowbell 1:1 精细贝塞尔电池 View
 
 @interface CBCustomBatteryIconView : UIView
 @property (nonatomic, assign) float batteryLevel;
@@ -47,19 +47,19 @@
     UIColor *fillColor   = self.isLowPowerMode ? [UIColor systemYellowColor] : [UIColor whiteColor];
 
     // 1. 电池外壳
-    CGFloat bodyWidth = rect.size.width - 3.5f; 
+    CGFloat bodyWidth = rect.size.width - 3.0f; 
     CGFloat bodyHeight = rect.size.height;
     CGRect bodyRect = CGRectMake(0.75f, 0.75f, bodyWidth - 1.5f, bodyHeight - 1.5f);
     
-    UIBezierPath *outlinePath = [UIBezierPath bezierPathWithRoundedRect:bodyRect cornerRadius:3.8f];
-    outlinePath.lineWidth = 1.3f;
+    UIBezierPath *outlinePath = [UIBezierPath bezierPathWithRoundedRect:bodyRect cornerRadius:4.0f];
+    outlinePath.lineWidth = 1.35f;
     [strokeColor setStroke];
     [outlinePath stroke];
 
-    // 2. 电池极耳 (Cap)
-    CGFloat capWidth = 1.8f;
-    CGFloat capHeight = bodyHeight * 0.40f;
-    CGFloat capX = bodyWidth + 0.5f;
+    // 2. 电池极耳 (对齐原版圆润短小特征)
+    CGFloat capWidth = 1.6f;
+    CGFloat capHeight = bodyHeight * 0.32f; // 缩短极耳高度
+    CGFloat capX = bodyWidth + 0.3f;
     CGFloat capY = (bodyHeight - capHeight) / 2.0f;
     
     UIBezierPath *capPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(capX, capY, capWidth, capHeight)
@@ -68,8 +68,8 @@
     [strokeColor setFill];
     [capPath fill];
 
-    // 3. 内部电量填充
-    CGFloat padding = 2.0f;
+    // 3. 内部填充 (缩小 padding，让白块更饱满)
+    CGFloat padding = 1.2f; 
     CGFloat maxFillWidth = bodyRect.size.width - (padding * 2.0f);
     CGFloat fillHeight = bodyRect.size.height - (padding * 2.0f);
     
@@ -80,7 +80,7 @@
     CGFloat actualFillWidth = MAX(1.5f, maxFillWidth * level);
     CGRect fillRect = CGRectMake(bodyRect.origin.x + padding, bodyRect.origin.y + padding, actualFillWidth, fillHeight);
     
-    UIBezierPath *fillPath = [UIBezierPath bezierPathWithRoundedRect:fillRect cornerRadius:1.8f];
+    UIBezierPath *fillPath = [UIBezierPath bezierPathWithRoundedRect:fillRect cornerRadius:2.2f];
     [fillColor setFill];
     [fillPath fill];
 }
@@ -165,8 +165,8 @@
         }
     }
 
-    // 2. 电池图标绝对居中（与周围其他图标完全水平对齐）
-    CGFloat iconW = 36.0f;
+    // 2. 电池位置 (绝对居中)
+    CGFloat iconW = 35.0f;
     CGFloat iconH = 16.0f;
     
     if (!self.cbBatteryIconView) {
@@ -177,17 +177,17 @@
         self.cbBatteryIconView.hidden = NO;
         self.cbBatteryIconView.frame = CGRectMake(0, 0, iconW, iconH);
     }
-    // 强制电池中心点与模块中心对齐
-    self.cbBatteryIconView.center = CGPointMake(width / 2.0f, height / 2.0f - 3.0f);
+    self.cbBatteryIconView.center = CGPointMake(width / 2.0f, (height / 2.0f) - 3.5f);
     [self bringSubviewToFront:self.cbBatteryIconView];
 
-    // 3. 百分比文字紧贴电池下方
-    CGFloat labelH = 12.0f;
-    CGFloat labelY = CGRectGetMaxY(self.cbBatteryIconView.frame) + 2.0f; // 电池下方留 2px 间隙
+    // 3. 百分比 Label (增大字号并加粗，对齐原版 96% 效果)
+    CGFloat labelH = 14.0f;
+    CGFloat labelY = CGRectGetMaxY(self.cbBatteryIconView.frame) + 1.5f;
     
     if (!self.cbPercentLabel) {
         UILabel *lab = [[UILabel alloc] initWithFrame:CGRectMake(0, labelY, width, labelH)];
-        lab.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightRegular];
+        // 使用 Medium 字重与 12.0pt，保证 % 符号与数字大小协调
+        lab.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium];
         lab.textAlignment = NSTextAlignmentCenter;
         lab.userInteractionEnabled = NO;
 
@@ -196,6 +196,7 @@
     } else {
         self.cbPercentLabel.hidden = NO;
         self.cbPercentLabel.frame = CGRectMake(0, labelY, width, labelH);
+        self.cbPercentLabel.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium];
     }
     [self bringSubviewToFront:self.cbPercentLabel];
 
