@@ -1,7 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-#pragma mark - 1. Cowbell 1:1 精细贝塞尔电池 View
+#pragma mark - 1. Cowbell 1:1 贝塞尔绘制电池 View
 
 @interface CBCustomBatteryIconView : UIView
 @property (nonatomic, assign) float batteryLevel;
@@ -46,19 +46,19 @@
     UIColor *strokeColor = self.isLowPowerMode ? [UIColor blackColor] : [UIColor whiteColor];
     UIColor *fillColor   = self.isLowPowerMode ? [UIColor systemYellowColor] : [UIColor whiteColor];
 
-    // 1. 电池外壳
-    CGFloat bodyWidth = rect.size.width - 3.0f; 
+    // 1. 电池外壳 (对齐 Cowbell 纤细干净的外框)
+    CGFloat bodyWidth = rect.size.width - 3.2f; 
     CGFloat bodyHeight = rect.size.height;
     CGRect bodyRect = CGRectMake(0.75f, 0.75f, bodyWidth - 1.5f, bodyHeight - 1.5f);
     
     UIBezierPath *outlinePath = [UIBezierPath bezierPathWithRoundedRect:bodyRect cornerRadius:4.0f];
-    outlinePath.lineWidth = 1.35f;
+    outlinePath.lineWidth = 1.3f;
     [strokeColor setStroke];
     [outlinePath stroke];
 
-    // 2. 电池极耳 (对齐原版圆润短小特征)
+    // 2. 电池极耳 (Cap)
     CGFloat capWidth = 1.6f;
-    CGFloat capHeight = bodyHeight * 0.32f; // 缩短极耳高度
+    CGFloat capHeight = bodyHeight * 0.35f;
     CGFloat capX = bodyWidth + 0.3f;
     CGFloat capY = (bodyHeight - capHeight) / 2.0f;
     
@@ -68,8 +68,8 @@
     [strokeColor setFill];
     [capPath fill];
 
-    // 3. 内部填充 (缩小 padding，让白块更饱满)
-    CGFloat padding = 1.2f; 
+    // 3. 内部电量填充
+    CGFloat padding = 1.2f;
     CGFloat maxFillWidth = bodyRect.size.width - (padding * 2.0f);
     CGFloat fillHeight = bodyRect.size.height - (padding * 2.0f);
     
@@ -165,29 +165,43 @@
         }
     }
 
-    // 2. 电池位置 (绝对居中)
+    // 2. 整体组合垂直居中精准计算
     CGFloat iconW = 35.0f;
-    CGFloat iconH = 16.0f;
+    CGFloat iconH = 15.5f;
+    CGFloat spacing = 2.0f;
+    CGFloat labelH = 13.0f;
     
+    CGFloat totalH = iconH + spacing + labelH; // 总高度 30.5
+    CGFloat startY = (height - totalH) / 2.0f; // 整体 Y 轴完全居中
+
+    // 3. 电池 View 布局
+    CGRect iconFrame = CGRectMake((width - iconW) / 2.0f, startY, iconW, iconH);
     if (!self.cbBatteryIconView) {
-        CBCustomBatteryIconView *bat = [[CBCustomBatteryIconView alloc] initWithFrame:CGRectMake(0, 0, iconW, iconH)];
+        CBCustomBatteryIconView *bat = [[CBCustomBatteryIconView alloc] initWithFrame:iconFrame];
         self.cbBatteryIconView = bat;
         [self addSubview:bat];
     } else {
         self.cbBatteryIconView.hidden = NO;
-        self.cbBatteryIconView.frame = CGRectMake(0, 0, iconW, iconH);
+        self.cbBatteryIconView.frame = iconFrame;
     }
-    self.cbBatteryIconView.center = CGPointMake(width / 2.0f, (height / 2.0f) - 3.5f);
     [self bringSubviewToFront:self.cbBatteryIconView];
 
-    // 3. 百分比 Label (增大字号并加粗，对齐原版 96% 效果)
-    CGFloat labelH = 14.0f;
-    CGFloat labelY = CGRectGetMaxY(self.cbBatteryIconView.frame) + 1.5f;
-    
+    // 4. 百分比 Label 布局 (完美解决 % 缩小问题)
+    CGRect labelFrame = CGRectMake(0, startY + iconH + spacing, width, labelH);
     if (!self.cbPercentLabel) {
-        UILabel *lab = [[UILabel alloc] initWithFrame:CGRectMake(0, labelY, width, labelH)];
-        // 使用 Medium 字重与 12.0pt，保证 % 符号与数字大小协调
-        lab.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium];
+        UILabel *lab = [[UILabel alloc] initWithFrame:labelFrame];
+        
+        // 关键改动：使用 SystemDesignRounded 保证 % 符号与数字同等比例放大，不出现小号 %
+        UIFont *roundedFont = [UIFont systemFontOfSize:11.5 weight:UIFontWeightMedium];
+        if (@available(iOS 13.0, *)) {
+            UIFontDescriptor *descriptor = [[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote].fontDescriptor
+                                             fontDescriptorWithDesign:UIFontDescriptorSystemDesignRounded];
+            if (descriptor) {
+                roundedFont = [UIFont fontWithDescriptor:descriptor size:11.5];
+            }
+        }
+        
+        lab.font = roundedFont;
         lab.textAlignment = NSTextAlignmentCenter;
         lab.userInteractionEnabled = NO;
 
@@ -195,12 +209,11 @@
         [self addSubview:lab];
     } else {
         self.cbPercentLabel.hidden = NO;
-        self.cbPercentLabel.frame = CGRectMake(0, labelY, width, labelH);
-        self.cbPercentLabel.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium];
+        self.cbPercentLabel.frame = labelFrame;
     }
     [self bringSubviewToFront:self.cbPercentLabel];
 
-    // 4. 刷新数据
+    // 5. 刷新数据
     [self cb_updateStateAndData];
 }
 
