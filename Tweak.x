@@ -1,122 +1,35 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
+// 声明系统私有类 _UIBatteryView
+@interface _UIBatteryView : UIView
+@property (nonatomic, assign) NSInteger chargeState;
+@property (nonatomic, assign) CGFloat chargePercent;
+@property (nonatomic, assign) BOOL saverModeActive;
+@property (nonatomic, assign) BOOL showsInlineChargingIndicator;
+- (instancetype)initWithSizeCategory:(NSInteger)category;
+- (void)setChargePercent:(CGFloat)chargePercent;
+@end
+
 @interface CCUIContentModuleContainerView : UIView
 @property (nonatomic, strong) NSString *moduleIdentifier;
 @property (nonatomic, strong) UILabel *cbPercentLabel;
-- (void)cb_updatePercentText;
+@property (nonatomic, strong) _UIBatteryView *cbBatteryView;
+- (void)cb_updatePercentTextAndIcon;
 - (BOOL)cb_isLowPowerModule;
 @end
 
-@interface CCUIRoundButton : UIView
-@property (nonatomic, strong) UIImageView *glyphImageView;
-@end
-
-@interface CCUILabeledRoundButtonViewController : UIViewController
-@property (nonatomic, strong) CCUIRoundButton *buttonContainer;
-@property (nonatomic, strong) UIImageView *glyphImageView;
-- (void)cb_applyDynamicBatteryIcon;
-@end
-
-// 精确绘制 1% 精细度的原生风格电池
-static UIImage *DrawNativeBatteryWithExactLevel(float level) {
-    CGSize size = CGSizeMake(24, 12);
-    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size];
-    
-    return [renderer imageWithActions:^(UIGraphicsImageRendererContext * _Nonnull rendererContext) {
-        // 1. 电池外框
-        CGRect outerRect = CGRectMake(1, 1, 20, 10);
-        UIBezierPath *outerPath = [UIBezierPath bezierPathWithRoundedRect:outerRect cornerRadius:3];
-        [[UIColor whiteColor] setStroke];
-        outerPath.lineWidth = 1.25;
-        [outerPath stroke];
-        
-        // 2. 正极头
-        CGRect tipRect = CGRectMake(21.5, 3.5, 1.5, 5);
-        UIBezierPath *tipPath = [UIBezierPath bezierPathWithRoundedRect:tipRect cornerRadius:0.75];
-        [[UIColor whiteColor] setFill];
-        [tipPath fill];
-        
-        // 3. 1% 精确内部填充
-        float percentage = fmaxf(0.0f, fminf(1.0f, level));
-        float maxFillWidth = 16.0f; 
-        float fillWidth = maxFillWidth * percentage;
-        
-        if (fillWidth > 0.5f) {
-            CGRect fillRect = CGRectMake(2.8, 2.8, fillWidth, 6.4);
-            UIBezierPath *fillPath = [UIBezierPath bezierPathWithRoundedRect:fillRect cornerRadius:1.5];
-            [[UIColor whiteColor] setFill];
-            [fillPath fill];
-        }
-    }];
-}
-
-// Hook 按钮控制器，强行覆盖图标设置
-%hook CCUILabeledRoundButtonViewController
-
-- (void)viewDidLayoutSubviews {
-    %orig;
-
-    // 判断是否为低电量模块
-    NSString *clsName = NSStringFromClass([self class]);
-    UIViewController *parent = self.parentViewController;
-    NSString *parentCls = parent ? NSStringFromClass([parent class]) : @"";
-
-    if ([clsName containsString:@"LowPower"] || [parentCls containsString:@"LowPower"]) {
-        [self cb_applyDynamicBatteryIcon];
-    }
-}
-
-- (void)setGlyphImage:(UIImage *)image {
-    UIViewController *parent = self.parentViewController;
-    NSString *clsName = NSStringFromClass([self class]);
-    NSString *parentCls = parent ? NSStringFromClass([parent class]) : @"";
-
-    if ([clsName containsString:@"LowPower"] || [parentCls containsString:@"LowPower"]) {
-        [UIDevice currentDevice].batteryMonitoringEnabled = YES;
-        float level = [UIDevice currentDevice].batteryLevel;
-        UIImage *dynImage = DrawNativeBatteryWithExactLevel(level);
-        %orig(dynImage);
-    } else {
-        %orig(image);
-    }
-}
-
-%new
-- (void)cb_applyDynamicBatteryIcon {
-    UIImageView *imageView = nil;
-    if ([self respondsToSelector:@selector(glyphImageView)]) {
-        imageView = self.glyphImageView;
-    }
-    if (!imageView && [self respondsToSelector:@selector(buttonContainer)]) {
-        CCUIRoundButton *btn = self.buttonContainer;
-        if ([btn respondsToSelector:@selector(glyphImageView)]) {
-            imageView = btn.glyphImageView;
-        }
-    }
-    
-    if (imageView) {
-        [UIDevice currentDevice].batteryMonitoringEnabled = YES;
-        float level = [UIDevice currentDevice].batteryLevel;
-        imageView.image = DrawNativeBatteryWithExactLevel(level);
-        imageView.contentMode = UIViewContentModeCenter;
-    }
-}
-
-%end
-
-// Hook 控制中心外部卡片容器（负责百分比 Label）
 %hook CCUIContentModuleContainerView
 
 %property (nonatomic, strong) UILabel *cbPercentLabel;
+%property (nonatomic, strong) _UIBatteryView *cbBatteryView;
 
 - (void)layoutSubviews {
     %orig;
 
     if (![self cb_isLowPowerModule]) {
-        if (self.cbPercentLabel) {
-            self.cbPercentLabel.hidden = YES;
-        }
+        if (self.cbPercentLabel) self.cbPercentLabel.hidden = YES;
+        if (self.cbBatteryView) self.cbBatteryView.hidden = YES;
         return;
     }
 
@@ -125,12 +38,35 @@ static UIImage *DrawNativeBatteryWithExactLevel(float level) {
 
     if (width <= 0 || height <= 0 || width > 100 || height > 100) return;
 
+    // 1. 递归隐藏原生图标ImageView，防止重影
     for (UIView *subview in self.subviews) {
-        if (subview != self.cbPercentLabel) {
-            subview.transform = CGAffineTransformIdentity;
+        if (subview != self.cbPercentLabel && subview != (UIView *)self.cbBatteryView) {
+            for (UIView *child in subview.subviews) {
+                if ([child isKindOfClass:[UIImageView class]]) {
+                    child.hidden = YES;
+                }
+            }
         }
     }
 
+    // 2. 嵌入系统原生的 _UIBatteryView 控件
+    if (!self.cbBatteryView) {
+        Class batteryClass = NSClassFromString(@"_UIBatteryView");
+        if (batteryClass) {
+            // sizeCategory 0 为标准尺寸，可自由设定 bounds
+            _UIBatteryView *bat = [[batteryClass alloc] initWithSizeCategory:0];
+            bat.frame = CGRectMake((width - 24) / 2.0, (height - 24) / 2.0 - 4, 24, 12);
+            bat.userInteractionEnabled = NO;
+            
+            self.cbBatteryView = bat;
+            [self addSubview:bat];
+        }
+    } else {
+        self.cbBatteryView.hidden = NO;
+        self.cbBatteryView.frame = CGRectMake((width - 24) / 2.0, (height - 24) / 2.0 - 4, 24, 12);
+    }
+
+    // 3. 嵌入百分比 Label
     if (!self.cbPercentLabel) {
         UILabel *lab = [[UILabel alloc] initWithFrame:CGRectMake(0, height - 22, width, 12)];
         lab.font = [UIFont systemFontOfSize:10 weight:UIFontWeightBold];
@@ -143,12 +79,12 @@ static UIImage *DrawNativeBatteryWithExactLevel(float level) {
         [UIDevice currentDevice].batteryMonitoringEnabled = YES;
         
         [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(cb_updatePercentText)
+                                                 selector:@selector(cb_updatePercentTextAndIcon)
                                                      name:UIDeviceBatteryLevelDidChangeNotification
                                                    object:nil];
                                                    
         [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(cb_updatePercentText)
+                                                 selector:@selector(cb_updatePercentTextAndIcon)
                                                      name:NSProcessInfoPowerStateDidChangeNotification
                                                    object:nil];
     } else {
@@ -156,8 +92,10 @@ static UIImage *DrawNativeBatteryWithExactLevel(float level) {
         self.cbPercentLabel.frame = CGRectMake(0, height - 22, width, 12);
     }
 
+    if (self.cbBatteryView) [self bringSubviewToFront:(UIView *)self.cbBatteryView];
     [self bringSubviewToFront:self.cbPercentLabel];
-    [self cb_updatePercentText];
+    
+    [self cb_updatePercentTextAndIcon];
 }
 
 %new
@@ -183,19 +121,29 @@ static UIImage *DrawNativeBatteryWithExactLevel(float level) {
 }
 
 %new
-- (void)cb_updatePercentText {
+- (void)cb_updatePercentTextAndIcon {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!self.cbPercentLabel) return;
-
+        [UIDevice currentDevice].batteryMonitoringEnabled = YES;
         float level = [UIDevice currentDevice].batteryLevel;
-        int percent = (level >= 0) ? (int)round(level * 100.0f) : 100;
-        self.cbPercentLabel.text = [NSString stringWithFormat:@"%d%%", percent];
+        if (level < 0) level = 1.0f;
+        int percent = (int)round(level * 100.0f);
 
-        BOOL isLowPowerMode = [NSProcessInfo processInfo].isLowPowerModeEnabled;
-        if (isLowPowerMode) {
-            self.cbPercentLabel.textColor = [UIColor blackColor];
-        } else {
-            self.cbPercentLabel.textColor = [UIColor whiteColor];
+        // 1. 刷新百分比
+        if (self.cbPercentLabel) {
+            self.cbPercentLabel.text = [NSString stringWithFormat:@"%d%%", percent];
+            BOOL isLowPowerMode = [NSProcessInfo processInfo].isLowPowerModeEnabled;
+            self.cbPercentLabel.textColor = isLowPowerMode ? [UIColor blackColor] : [UIColor whiteColor];
+        }
+
+        // 2. 将电量精准传给系统原生 _UIBatteryView 控件 (0.0 ~ 1.0)
+        if (self.cbBatteryView) {
+            [self.cbBatteryView setChargePercent:level];
+            
+            // 同步低电量模式状态（开启时内部填充条会自动变红/黄）
+            BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
+            if ([self.cbBatteryView respondsToSelector:@selector(setSaverModeActive:)]) {
+                [self.cbBatteryView setSaverModeActive:isLowPower];
+            }
         }
     });
 }
