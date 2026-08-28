@@ -5,58 +5,36 @@
 - (void)updateBatteryIcon;
 @end
 
-// 动态绘制 1% 精细度的电池图标
-static UIImage *DrawCustomBatteryImage(float level, BOOL isCharging) {
-    CGSize size = CGSizeMake(28, 14);
+static UIImage *DrawNativeStyleBattery(float level) {
+    CGSize size = CGSizeMake(26, 13);
     UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size];
     
     return [renderer imageWithActions:^(UIGraphicsImageRendererContext * _Nonnull rendererContext) {
         CGContextRef ctx = rendererContext.CGContext;
         
-        // 1. 绘制电池外框
-        CGRect outerRect = CGRectMake(1, 1, 22, 12);
-        UIBezierPath *outerPath = [UIBezierPath bezierPathWithRoundedRect:outerRect cornerRadius:3];
+        // 1. 绘制原生标准外框
+        CGRect outerRect = CGRectMake(1, 1, 21, 11);
+        UIBezierPath *outerPath = [UIBezierPath bezierPathWithRoundedRect:outerRect cornerRadius:3.5];
         [[UIColor whiteColor] setStroke];
-        outerPath.lineWidth = 1.5;
+        outerPath.lineWidth = 1.25;
         [outerPath stroke];
         
-        // 2. 绘制电池正极凸起头
-        CGRect tipRect = CGRectMake(24, 4.5, 2, 5);
-        UIBezierPath *tipPath = [UIBezierPath bezierPathWithRoundedRect:tipRect cornerRadius:1];
+        // 2. 绘制电池正极头
+        CGRect tipRect = CGRectMake(23, 4, 1.5, 5);
+        UIBezierPath *tipPath = [UIBezierPath bezierPathWithRoundedRect:tipRect cornerRadius:0.75];
         [[UIColor whiteColor] setFill];
         [tipPath fill];
         
-        // 3. 动态绘制内部电量填充（精确到 1%）
+        // 3. 按 1% 精确比例平滑填充内部（纯白）
         float percentage = fmaxf(0.0f, fminf(1.0f, level));
-        float maxFillWidth = 18.0f; // 内部最大可填充宽度
+        float maxFillWidth = 17.0f; 
         float fillWidth = maxFillWidth * percentage;
         
         if (fillWidth > 0.5f) {
-            CGRect fillRect = CGRectMake(3, 3, fillWidth, 8);
+            CGRect fillRect = CGRectMake(3, 3, fillWidth, 7);
             UIBezierPath *fillPath = [UIBezierPath bezierPathWithRoundedRect:fillRect cornerRadius:1.5];
-            
-            // 低电量标红，平时标白
-            if (percentage <= 0.20f) {
-                [[UIColor systemRedColor] setFill];
-            } else {
-                [[UIColor whiteColor] setFill];
-            }
+            [[UIColor whiteColor] setFill];
             [fillPath fill];
-        }
-        
-        // 4. 如果在充电，绘制闪电符号
-        if (isCharging) {
-            UIBezierPath *boltPath = [UIBezierPath bezierPath];
-            [boltPath moveToPoint:CGPointMake(13, 2)];
-            [boltPath addLineToPoint:CGPointMake(8, 7.5)];
-            [boltPath addLineToPoint:CGPointMake(11.5, 7.5)];
-            [boltPath addLineToPoint:CGPointMake(10, 12)];
-            [boltPath addLineToPoint:CGPointMake(15, 6.5)];
-            [boltPath addLineToPoint:CGPointMake(11.5, 6.5)];
-            [boltPath closePath];
-            
-            [[UIColor systemYellowColor] setFill];
-            [boltPath fill];
         }
     }];
 }
@@ -78,13 +56,11 @@ static void UpdateGlyphForButton(id buttonController) {
 
     [UIDevice currentDevice].batteryMonitoringEnabled = YES;
     float batteryLevel = [UIDevice currentDevice].batteryLevel;
-    BOOL isCharging = ([UIDevice currentDevice].batteryState == UIDeviceBatteryStateCharging || 
-                        [UIDevice currentDevice].batteryState == UIDeviceBatteryStateFull);
 
-    // 绘制并替换原生图标
-    UIImage *customBattery = DrawCustomBatteryImage(batteryLevel, isCharging);
-    if (customBattery) {
-        imageView.image = customBattery;
+    // 替换为纯粹的原生动态填充图像
+    UIImage *batteryImage = DrawNativeStyleBattery(batteryLevel);
+    if (batteryImage) {
+        imageView.image = batteryImage;
         imageView.contentMode = UIViewContentModeCenter;
     }
 }
@@ -95,15 +71,9 @@ static void UpdateGlyphForButton(id buttonController) {
     %orig;
     
     [[NSNotificationCenter defaultCenter] removeObserver:self name:UIDeviceBatteryLevelDidChangeNotification object:nil];
-    [[NSNotificationCenter defaultCenter] removeObserver:self name:UIDeviceBatteryStateDidChangeNotification object:nil];
-    
     [[NSNotificationCenter defaultCenter] addObserver:self 
                                              selector:@selector(updateBatteryIcon) 
                                                  name:UIDeviceBatteryLevelDidChangeNotification 
-                                               object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self 
-                                             selector:@selector(updateBatteryIcon) 
-                                                 name:UIDeviceBatteryStateDidChangeNotification 
                                                object:nil];
     [self updateBatteryIcon];
 }
