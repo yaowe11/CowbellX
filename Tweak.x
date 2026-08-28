@@ -1,10 +1,10 @@
 #import <UIKit/UIKit.h>
+#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
-@interface CCUIRoundButton : UIView
-@property (nonatomic, strong) UIImageView *cbCustomBatteryImageView;
-- (void)cb_updateDynamicBattery;
-- (BOOL)cb_isLowPowerButton;
+@interface CCUICAPackageView : UIView
+- (BOOL)cb_isLowPowerPackage;
+- (void)cb_updateBatteryProgress;
 @end
 
 @interface CCUIContentModuleContainerView : UIView
@@ -14,86 +14,28 @@
 - (BOOL)cb_isLowPowerModule;
 @end
 
-#pragma mark - Hook 按钮（处理 100% 原生图标 + 1% 动态 Mask 裁剪）
+#pragma mark - 1. 劫持原生 CAPackage 图层实现 1% 平滑缩放
 
-%hook CCUIRoundButton
-
-%property (nonatomic, strong) UIImageView *cbCustomBatteryImageView;
+%hook CCUICAPackageView
 
 - (void)layoutSubviews {
     %orig;
 
-    if (![self cb_isLowPowerButton]) return;
-
-    // 1. 彻底隐藏所有原生子控件（包括 iOS 动画 Package），防止重影
-    for (UIView *sub in self.subviews) {
-        if (sub != self.cbCustomBatteryImageView) {
-            sub.hidden = YES;
-            sub.alpha = 0.0;
-        }
+    if ([self cb_isLowPowerPackage]) {
+        [self cb_updateBatteryProgress];
     }
+}
 
-    // 2. 初始化自定义的图片 View（直接采用系统官方原生 battery.100 SF Symbol）
-    if (!self.cbCustomBatteryImageView) {
-        UIImageView *imgView = [[UIImageView alloc] init];
-        imgView.contentMode = UIViewContentModeScaleAspectFit;
-        imgView.userInteractionEnabled = NO;
+- (void)setStateName:(NSString *)stateName {
+    %orig;
 
-        // 加载 100% 官方原生的 SF Symbol 图标，保证尺寸线宽和控制中心完全一致
-        UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:22 weight:UIImageSymbolWeightRegular];
-        UIImage *nativeSymbol = [UIImage systemImageNamed:@"battery.100" withConfiguration:config];
-        imgView.image = [nativeSymbol imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-        imgView.tintColor = [UIColor whiteColor];
-
-        // 精确居中对齐
-        imgView.bounds = CGRectMake(0, 0, 28, 14);
-        imgView.center = CGPointMake(self.bounds.size.width / 2.0, self.bounds.size.height / 2.0 - 2);
-
-        self.cbCustomBatteryImageView = imgView;
-        [self addSubview:imgView];
-    } else {
-        self.cbCustomBatteryImageView.center = CGPointMake(self.bounds.size.width / 2.0, self.bounds.size.height / 2.0 - 2);
+    if ([self cb_isLowPowerPackage]) {
+        [self cb_updateBatteryProgress];
     }
-
-    // 3. 刷新 1% 动态电量蒙版
-    [self cb_updateDynamicBattery];
 }
 
 %new
-- (void)cb_updateDynamicBattery {
-    if (!self.cbCustomBatteryImageView) return;
-
-    [self bringSubviewToFront:self.cbCustomBatteryImageView];
-
-    [UIDevice currentDevice].batteryMonitoringEnabled = YES;
-    float level = [UIDevice currentDevice].batteryLevel;
-    if (level < 0) level = 1.0f;
-
-    // 根据开关状态调整图标颜色
-    BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
-    self.cbCustomBatteryImageView.tintColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
-
-    // 动态生成 Mask 遮罩，实现 1% 级别的平滑填充裁剪
-    // 保留左侧电池框（约 15% 宽度），右侧 85% 宽度根据电量 0.0~1.0 精细计算
-    CGFloat totalW = self.cbCustomBatteryImageView.bounds.size.width;
-    CGFloat totalH = self.cbCustomBatteryImageView.bounds.size.height;
-
-    CGFloat minBorderW = totalW * 0.15f; 
-    CGFloat fillableW = totalW - minBorderW;
-    CGFloat visibleW = minBorderW + (fillableW * level);
-
-    CAShapeLayer *maskLayer = (CAShapeLayer *)self.cbCustomBatteryImageView.layer.mask;
-    if (![maskLayer isKindOfClass:[CAShapeLayer class]]) {
-        maskLayer = [CAShapeLayer layer];
-        self.cbCustomBatteryImageView.layer.mask = maskLayer;
-    }
-
-    UIBezierPath *path = [UIBezierPath bezierPathWithRect:CGRectMake(0, 0, visibleW, totalH)];
-    maskLayer.path = path.CGPath;
-}
-
-%new
-- (BOOL)cb_isLowPowerButton {
+- (BOOL)cb_isLowPowerPackage {
     UIResponder *responder = self;
     while (responder) {
         NSString *clsName = NSStringFromClass([responder class]);
@@ -105,9 +47,26 @@
     return NO;
 }
 
+%new
+- (void)cb_updateBatteryProgress {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [UIDevice currentDevice].batteryMonitoringEnabled = YES;
+        float level = [UIDevice currentDevice].batteryLevel;
+        if (level < 0) level = 1.0f;
+
+        // 冻结原生 CALayer 动画播放，将电量百分比(0.0~1.0)直接映射为动画帧进度
+        self.layer.speed = 0.0;
+        
+        CFTimeInterval duration = self.layer.duration;
+        if (duration <= 0) duration = 1.0; // 防止未获取到 duration 时除零
+        
+        self.layer.timeOffset = level * duration;
+    });
+}
+
 %end
 
-#pragma mark - Hook 容器（处理底部百分比 Label）
+#pragma mark - 2. 渲染底部 81% 百分比 Label
 
 %hook CCUIContentModuleContainerView
 
