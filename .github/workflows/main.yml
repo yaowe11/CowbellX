@@ -1,4 +1,4 @@
-Name: Build SimpleCowbell Rootless
+name: Build SimpleCowbell Rootless
 
 on:
   push:
@@ -7,14 +7,22 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Theos
-        uses: do233/setup-theos-action@v1
+      - name: Install ldid
+        run: brew install ldid
+
+      - name: Setup Theos & SDKs
+        run: |
+          git clone --recursive https://github.com/theos/theos.git ~/theos
+          rm -rf ~/theos/sdks
+          git clone https://github.com/theos/sdks.git ~/theos/sdks
+          ln -sf $(which ldid) ~/theos/bin/ldid
+          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
       - name: Build Tweak Package
         run: |
