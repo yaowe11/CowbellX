@@ -1,14 +1,12 @@
-THEOS_PACKAGE_SCHEME = rootless
 TARGET := iphone:clang:latest:15.0
 
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = SimpleCowbell
 
-$(TWEAK_NAME)_FILES = Tweak.x
-$(TWEAK_NAME)_CFLAGS = -fobjc-arc
-$(TWEAK_NAME)_FRAMEWORKS = UIKit CoreGraphics
-$(TWEAK_NAME)_LDFLAGS += -Wl,-segalign,0x4000
+SimpleCowbell_FILES = Tweak.x
+SimpleCowbell_CFLAGS = -fobjc-arc
+SimpleCowbell_FRAMEWORKS = UIKit CoreGraphics
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
