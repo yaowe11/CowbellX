@@ -1,9 +1,9 @@
 Package: com.yaowell.cowbellx
 Name: CowbellX
-Depends: mobilesubstrate
+Depends: mobilesubstrate, firmware (>= 15.0)
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: 控制中心低电量模块显示电量百分比，即装即用。致敬 LaughingQuoll。/ Displays battery percentage in CC Low Power Mode module. Inspired by LaughingQuoll.
+Description: CC LowPowerModule battery percentage
 Maintainer: yaowell
 Author: yaowell
 Section: Tweaks
