@@ -6,6 +6,7 @@
 @property (nonatomic, strong) UILabel *cbPercentLabel;
 - (void)cb_updatePercentText;
 - (BOOL)cb_isLowPowerModule;
+- (UIImageView *)cb_findActualGlyphImageViewInView:(UIView *)view;
 @end
 
 @interface CCUIRoundButton : UIView
@@ -93,13 +94,12 @@
     return NO;
 }
 
-// 寻找真正存放图标的原生 ImageView（精确匹配尺寸与类，防止误触背景层）
+%new
 - (UIImageView *)cb_findActualGlyphImageViewInView:(UIView *)view {
     if (!view || view == self.cbPercentLabel) return nil;
     
     if ([view isKindOfClass:[UIImageView class]]) {
         CGSize s = view.bounds.size;
-        // 原生 glyphImageView 的宽高通常在 15~35 之间，过滤掉全屏/大背景的 ImageView
         if (s.width > 10 && s.width < 40 && s.height > 10 && s.height < 40) {
             return (UIImageView *)view;
         }
@@ -117,7 +117,6 @@
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!self.cbPercentLabel) return;
 
-        // 1. 电量与文字更新
         float level = [UIDevice currentDevice].batteryLevel;
         int percent = (level >= 0) ? (int)round(level * 100.0f) : 100;
         self.cbPercentLabel.text = [NSString stringWithFormat:@"%d%%", percent];
@@ -129,10 +128,8 @@
             self.cbPercentLabel.textColor = [UIColor whiteColor];
         }
 
-        // 2. 原生 SF Symbols 图标精准替换（无重影、纯原生矢量）
         UIImageView *glyphImageView = [self cb_findActualGlyphImageViewInView:self];
         if (glyphImageView) {
-            // 使用 iOS 系统自带的原生 SF Symbol 图标，保证 100% 官方比例
             NSString *symbolName = @"battery.100";
             if (percent <= 15) {
                 symbolName = @"battery.0";
