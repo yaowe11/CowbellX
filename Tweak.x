@@ -1,93 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-#pragma mark - 1. Cowbell 1:1 贝塞尔绘制电池 View
-
-@interface CBCustomBatteryIconView : UIView
-@property (nonatomic, assign) float batteryLevel;
-@property (nonatomic, assign) BOOL isLowPowerMode;
-@end
-
-@implementation CBCustomBatteryIconView
-
-- (instancetype)initWithFrame:(CGRect)frame {
-    self = [super initWithFrame:frame];
-    if (self) {
-        self.backgroundColor = [UIColor clearColor];
-        self.userInteractionEnabled = NO;
-        self.batteryLevel = 1.0f;
-    }
-    return self;
-}
-
-- (void)setBatteryLevel:(float)batteryLevel {
-    if (_batteryLevel != batteryLevel) {
-        _batteryLevel = batteryLevel;
-        [self setNeedsDisplay];
-    }
-}
-
-- (void)setIsLowPowerMode:(BOOL)isLowPowerMode {
-    if (_isLowPowerMode != isLowPowerMode) {
-        _isLowPowerMode = isLowPowerMode;
-        [self setNeedsDisplay];
-    }
-}
-
-- (void)drawRect:(CGRect)rect {
-    [super drawRect:rect];
-
-    CGContextRef context = UIGraphicsGetCurrentContext();
-    if (!context) return;
-
-    CGContextSetShouldAntialias(context, YES);
-    CGContextSetAllowsAntialiasing(context, YES);
-
-    UIColor *strokeColor = self.isLowPowerMode ? [UIColor blackColor] : [UIColor whiteColor];
-    UIColor *fillColor   = self.isLowPowerMode ? [UIColor systemYellowColor] : [UIColor whiteColor];
-
-    // 1. 电池外壳 (对齐 Cowbell 纤细干净的外框)
-    CGFloat bodyWidth = rect.size.width - 3.2f; 
-    CGFloat bodyHeight = rect.size.height;
-    CGRect bodyRect = CGRectMake(0.75f, 0.75f, bodyWidth - 1.5f, bodyHeight - 1.5f);
-    
-    UIBezierPath *outlinePath = [UIBezierPath bezierPathWithRoundedRect:bodyRect cornerRadius:4.0f];
-    outlinePath.lineWidth = 1.3f;
-    [strokeColor setStroke];
-    [outlinePath stroke];
-
-    // 2. 电池极耳 (Cap)
-    CGFloat capWidth = 1.6f;
-    CGFloat capHeight = bodyHeight * 0.35f;
-    CGFloat capX = bodyWidth + 0.3f;
-    CGFloat capY = (bodyHeight - capHeight) / 2.0f;
-    
-    UIBezierPath *capPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(capX, capY, capWidth, capHeight)
-                                                  byRoundingCorners:(UIRectCornerTopRight | UIRectCornerBottomRight)
-                                                        cornerRadii:CGSizeMake(1.2, 1.2)];
-    [strokeColor setFill];
-    [capPath fill];
-
-    // 3. 内部电量填充
-    CGFloat padding = 1.2f;
-    CGFloat maxFillWidth = bodyRect.size.width - (padding * 2.0f);
-    CGFloat fillHeight = bodyRect.size.height - (padding * 2.0f);
-    
-    float level = self.batteryLevel;
-    if (level < 0.0f) level = 1.0f;
-    if (level > 1.0f) level = 1.0f;
-    
-    CGFloat actualFillWidth = MAX(1.5f, maxFillWidth * level);
-    CGRect fillRect = CGRectMake(bodyRect.origin.x + padding, bodyRect.origin.y + padding, actualFillWidth, fillHeight);
-    
-    UIBezierPath *fillPath = [UIBezierPath bezierPathWithRoundedRect:fillRect cornerRadius:2.2f];
-    [fillColor setFill];
-    [fillPath fill];
-}
-
-@end
-
-#pragma mark - 2. Hook CCUIContentModuleContainerView
+#pragma mark - Hook CCUIContentModuleContainerView
 
 @interface CCUIContentModuleContainerViewController : UIViewController
 @property (nonatomic, strong) UIViewController *contentViewController;
@@ -95,8 +9,8 @@
 
 @interface CCUIContentModuleContainerView : UIView
 @property (nonatomic, strong) NSString *moduleIdentifier;
+@property (nonatomic, strong) UIImageView *cbBatteryImageView;
 @property (nonatomic, strong) UILabel *cbPercentLabel;
-@property (nonatomic, strong) CBCustomBatteryIconView *cbBatteryIconView;
 @property (nonatomic, assign) BOOL cb_observerRegistered;
 
 - (BOOL)cb_isLowPowerModule;
@@ -106,8 +20,8 @@
 
 %hook CCUIContentModuleContainerView
 
+%property (nonatomic, strong) UIImageView *cbBatteryImageView;
 %property (nonatomic, strong) UILabel *cbPercentLabel;
-%property (nonatomic, strong) CBCustomBatteryIconView *cbBatteryIconView;
 %property (nonatomic, assign) BOOL cb_observerRegistered;
 
 - (void)didMoveToWindow {
@@ -118,13 +32,13 @@
         [UIDevice currentDevice].batteryMonitoringEnabled = YES;
         if (!self.cb_observerRegistered) {
             self.cb_observerRegistered = YES;
-            [[NSNotificationCenter defaultCenter] addObserver:self 
-                                                     selector:@selector(cb_updateStateAndData) 
-                                                         name:UIDeviceBatteryLevelDidChangeNotification 
+            [[NSNotificationCenter defaultCenter] addObserver:self
+                                                     selector:@selector(cb_updateStateAndData)
+                                                         name:UIDeviceBatteryLevelDidChangeNotification
                                                        object:nil];
-            [[NSNotificationCenter defaultCenter] addObserver:self 
-                                                     selector:@selector(cb_updateStateAndData) 
-                                                         name:NSProcessInfoPowerStateDidChangeNotification 
+            [[NSNotificationCenter defaultCenter] addObserver:self
+                                                     selector:@selector(cb_updateStateAndData)
+                                                         name:NSProcessInfoPowerStateDidChangeNotification
                                                        object:nil];
         }
     } else {
@@ -140,7 +54,7 @@
 
     if (![self cb_isLowPowerModule]) {
         if (self.cbPercentLabel) self.cbPercentLabel.hidden = YES;
-        if (self.cbBatteryIconView) self.cbBatteryIconView.hidden = YES;
+        if (self.cbBatteryImageView) self.cbBatteryImageView.hidden = YES;
         return;
     }
 
@@ -148,9 +62,9 @@
     CGFloat height = self.bounds.size.height;
     if (width <= 0 || height <= 0 || width > 120 || height > 120) return;
 
-    // 1. 递归隐藏原生 Symbol 图标
+    // 1. 递归隐藏控制中心默认的静态 Icon
     [self cb_hideSystemSymbolImageViewInView:self];
-    
+
     UIResponder *responder = self;
     while (responder && ![responder isKindOfClass:[UIViewController class]]) {
         responder = responder.nextResponder;
@@ -165,43 +79,34 @@
         }
     }
 
-    // 2. 整体组合垂直居中精准计算
-    CGFloat iconW = 35.0f;
-    CGFloat iconH = 15.5f;
+    // 2. 布局：还原最一开始最完美的居中与尺寸比例
+    CGFloat iconW = 38.0f;
+    CGFloat iconH = 18.0f;
     CGFloat spacing = 2.0f;
     CGFloat labelH = 13.0f;
-    
-    CGFloat totalH = iconH + spacing + labelH; // 总高度 30.5
-    CGFloat startY = (height - totalH) / 2.0f; // 整体 Y 轴完全居中
 
-    // 3. 电池 View 布局
+    CGFloat totalH = iconH + spacing + labelH;
+    CGFloat startY = (height - totalH) / 2.0f;
+
+    // 3. SF‑Symbol UIImageView
     CGRect iconFrame = CGRectMake((width - iconW) / 2.0f, startY, iconW, iconH);
-    if (!self.cbBatteryIconView) {
-        CBCustomBatteryIconView *bat = [[CBCustomBatteryIconView alloc] initWithFrame:iconFrame];
-        self.cbBatteryIconView = bat;
-        [self addSubview:bat];
+    if (!self.cbBatteryImageView) {
+        UIImageView *imgView = [[UIImageView alloc] initWithFrame:iconFrame];
+        imgView.contentMode = UIViewContentModeScaleAspectFit;
+        imgView.userInteractionEnabled = NO;
+        self.cbBatteryImageView = imgView;
+        [self addSubview:imgView];
     } else {
-        self.cbBatteryIconView.hidden = NO;
-        self.cbBatteryIconView.frame = iconFrame;
+        self.cbBatteryImageView.hidden = NO;
+        self.cbBatteryImageView.frame = iconFrame;
     }
-    [self bringSubviewToFront:self.cbBatteryIconView];
+    [self bringSubviewToFront:self.cbBatteryImageView];
 
-    // 4. 百分比 Label 布局 (完美解决 % 缩小问题)
+    // 4. 百分比 Label
     CGRect labelFrame = CGRectMake(0, startY + iconH + spacing, width, labelH);
     if (!self.cbPercentLabel) {
         UILabel *lab = [[UILabel alloc] initWithFrame:labelFrame];
-        
-        // 关键改动：使用 SystemDesignRounded 保证 % 符号与数字同等比例放大，不出现小号 %
-        UIFont *roundedFont = [UIFont systemFontOfSize:11.5 weight:UIFontWeightMedium];
-        if (@available(iOS 13.0, *)) {
-            UIFontDescriptor *descriptor = [[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote].fontDescriptor
-                                             fontDescriptorWithDesign:UIFontDescriptorSystemDesignRounded];
-            if (descriptor) {
-                roundedFont = [UIFont fontWithDescriptor:descriptor size:11.5];
-            }
-        }
-        
-        lab.font = roundedFont;
+        lab.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightMedium];
         lab.textAlignment = NSTextAlignmentCenter;
         lab.userInteractionEnabled = NO;
 
@@ -241,7 +146,7 @@
 %new
 - (void)cb_hideSystemSymbolImageViewInView:(UIView *)parentView {
     for (UIView *subview in parentView.subviews) {
-        if (subview == self.cbBatteryIconView || subview == self.cbPercentLabel) {
+        if (subview == self.cbBatteryImageView || subview == self.cbPercentLabel) {
             continue;
         }
         if ([subview isKindOfClass:[UIImageView class]] ||
@@ -265,15 +170,36 @@
         if (level < 0) level = 1.0f;
         BOOL isLowPowerMode = [NSProcessInfo processInfo].isLowPowerModeEnabled;
 
-        if (strongSelf.cbBatteryIconView) {
-            strongSelf.cbBatteryIconView.isLowPowerMode = isLowPowerMode;
-            strongSelf.cbBatteryIconView.batteryLevel = level;
+        NSString *symbolName = @"battery.100";
+        if (level <= 0.05f) {
+            symbolName = @"battery.0";
+        } else if (level <= 0.35f) {
+            symbolName = @"battery.25";
+        } else if (level <= 0.65f) {
+            symbolName = @"battery.50";
+        } else if (level <= 0.88f) {
+            symbolName = @"battery.75";
+        } else {
+            symbolName = @"battery.100";
+        }
+
+        UIImage *systemIcon = nil;
+        UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:18.0 weight:UIImageSymbolWeightRegular];
+        systemIcon = [UIImage systemImageNamed:@"battery.100" variableValue:level configuration:config];
+
+        if (!systemIcon) {
+            systemIcon = [UIImage systemImageNamed:symbolName withConfiguration:config];
+        }
+
+        if (strongSelf.cbBatteryImageView) {
+            strongSelf.cbBatteryImageView.image = systemIcon;
+            strongSelf.cbBatteryImageView.tintColor = isLowPowerMode ? [UIColor blackColor] : [UIColor whiteColor];
         }
 
         if (strongSelf.cbPercentLabel) {
             int percent = (int)round(level * 100.0f);
             strongSelf.cbPercentLabel.text = [NSString stringWithFormat:@"%d%%", percent];
-            strongSelf.cbPercentLabel.textColor = isLowPowerMode ? [UIColor colorWithWhite:0.15 alpha:1.0] : [UIColor whiteColor];
+            strongSelf.cbPercentLabel.textColor = isLowPowerMode ? [UIColor blackColor] : [UIColor whiteColor];
         }
     });
 }
