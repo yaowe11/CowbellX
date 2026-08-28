@@ -1,7 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-#pragma mark - 1. Cowbell 1:1 贝塞尔绘制电池 View (拉长比例)
+#pragma mark - 1. Cowbell 1:1 贝塞尔绘制电池 View
 
 @interface CBCustomBatteryIconView : UIView
 @property (nonatomic, assign) float batteryLevel;
@@ -43,7 +43,6 @@
     CGContextSetShouldAntialias(context, YES);
     CGContextSetAllowsAntialiasing(context, YES);
 
-    // 低电量开启：黑框 + 黄柱；未开启：全白
     UIColor *strokeColor = self.isLowPowerMode ? [UIColor blackColor] : [UIColor whiteColor];
     UIColor *fillColor   = self.isLowPowerMode ? [UIColor systemYellowColor] : [UIColor whiteColor];
 
@@ -166,32 +165,29 @@
         }
     }
 
-    // 2. 整体垂直居中坐标计算
-    CGFloat iconW = 37.0f; // 更修长的电池图
+    // 2. 电池图标绝对居中（与周围其他图标完全水平对齐）
+    CGFloat iconW = 36.0f;
     CGFloat iconH = 16.0f;
-    CGFloat spacing = 4.0f; // 电池与文字的精致间距
-    CGFloat labelH = 14.0f;
     
-    CGFloat totalH = iconH + spacing + labelH;
-    CGFloat startY = (height - totalH) / 2.0f; // 整体居中起点
-
-    // 3. 配置电池 View
-    CGRect iconFrame = CGRectMake((width - iconW) / 2.0f, startY, iconW, iconH);
     if (!self.cbBatteryIconView) {
-        CBCustomBatteryIconView *bat = [[CBCustomBatteryIconView alloc] initWithFrame:iconFrame];
+        CBCustomBatteryIconView *bat = [[CBCustomBatteryIconView alloc] initWithFrame:CGRectMake(0, 0, iconW, iconH)];
         self.cbBatteryIconView = bat;
         [self addSubview:bat];
     } else {
         self.cbBatteryIconView.hidden = NO;
-        self.cbBatteryIconView.frame = iconFrame;
+        self.cbBatteryIconView.frame = CGRectMake(0, 0, iconW, iconH);
     }
+    // 强制电池中心点与模块中心对齐
+    self.cbBatteryIconView.center = CGPointMake(width / 2.0f, height / 2.0f - 3.0f);
     [self bringSubviewToFront:self.cbBatteryIconView];
 
-    // 4. 配置百分比 Label
-    CGRect labelFrame = CGRectMake(0, startY + iconH + spacing, width, labelH);
+    // 3. 百分比文字紧贴电池下方
+    CGFloat labelH = 12.0f;
+    CGFloat labelY = CGRectGetMaxY(self.cbBatteryIconView.frame) + 2.0f; // 电池下方留 2px 间隙
+    
     if (!self.cbPercentLabel) {
-        UILabel *lab = [[UILabel alloc] initWithFrame:labelFrame];
-        lab.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightMedium];
+        UILabel *lab = [[UILabel alloc] initWithFrame:CGRectMake(0, labelY, width, labelH)];
+        lab.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightRegular];
         lab.textAlignment = NSTextAlignmentCenter;
         lab.userInteractionEnabled = NO;
 
@@ -199,11 +195,11 @@
         [self addSubview:lab];
     } else {
         self.cbPercentLabel.hidden = NO;
-        self.cbPercentLabel.frame = labelFrame;
+        self.cbPercentLabel.frame = CGRectMake(0, labelY, width, labelH);
     }
     [self bringSubviewToFront:self.cbPercentLabel];
 
-    // 5. 刷新状态
+    // 4. 刷新数据
     [self cb_updateStateAndData];
 }
 
