@@ -1,7 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-#pragma mark - 1. Cowbell 1:1 贝塞尔绘制电池 View
+#pragma mark - 1. Cowbell 1:1 贝塞尔绘制电池 View (拉长比例)
 
 @interface CBCustomBatteryIconView : UIView
 @property (nonatomic, assign) float batteryLevel;
@@ -43,9 +43,7 @@
     CGContextSetShouldAntialias(context, YES);
     CGContextSetAllowsAntialiasing(context, YES);
 
-    // 配色逻辑完全对齐 Cowbell：
-    // 低电量开启（图1）：外框/极耳为黑色，内部填充为黄色
-    // 低电量关闭（图2）：外框/极耳/内部填充均为白色
+    // 低电量开启：黑框 + 黄柱；未开启：全白
     UIColor *strokeColor = self.isLowPowerMode ? [UIColor blackColor] : [UIColor whiteColor];
     UIColor *fillColor   = self.isLowPowerMode ? [UIColor systemYellowColor] : [UIColor whiteColor];
 
@@ -54,8 +52,8 @@
     CGFloat bodyHeight = rect.size.height;
     CGRect bodyRect = CGRectMake(0.75f, 0.75f, bodyWidth - 1.5f, bodyHeight - 1.5f);
     
-    UIBezierPath *outlinePath = [UIBezierPath bezierPathWithRoundedRect:bodyRect cornerRadius:3.5f];
-    outlinePath.lineWidth = 1.3f; // 对齐 Cowbell 纤细干净的外框
+    UIBezierPath *outlinePath = [UIBezierPath bezierPathWithRoundedRect:bodyRect cornerRadius:3.8f];
+    outlinePath.lineWidth = 1.3f;
     [strokeColor setStroke];
     [outlinePath stroke];
 
@@ -83,7 +81,7 @@
     CGFloat actualFillWidth = MAX(1.5f, maxFillWidth * level);
     CGRect fillRect = CGRectMake(bodyRect.origin.x + padding, bodyRect.origin.y + padding, actualFillWidth, fillHeight);
     
-    UIBezierPath *fillPath = [UIBezierPath bezierPathWithRoundedRect:fillRect cornerRadius:1.5f];
+    UIBezierPath *fillPath = [UIBezierPath bezierPathWithRoundedRect:fillRect cornerRadius:1.8f];
     [fillColor setFill];
     [fillPath fill];
 }
@@ -168,24 +166,32 @@
         }
     }
 
-    // 2. 电池尺寸对齐 Cowbell 比例 (32x15)
+    // 2. 整体垂直居中坐标计算
+    CGFloat iconW = 37.0f; // 更修长的电池图
+    CGFloat iconH = 16.0f;
+    CGFloat spacing = 4.0f; // 电池与文字的精致间距
+    CGFloat labelH = 14.0f;
+    
+    CGFloat totalH = iconH + spacing + labelH;
+    CGFloat startY = (height - totalH) / 2.0f; // 整体居中起点
+
+    // 3. 配置电池 View
+    CGRect iconFrame = CGRectMake((width - iconW) / 2.0f, startY, iconW, iconH);
     if (!self.cbBatteryIconView) {
-        CBCustomBatteryIconView *bat = [[CBCustomBatteryIconView alloc] initWithFrame:CGRectMake(0, 0, 32, 15)];
+        CBCustomBatteryIconView *bat = [[CBCustomBatteryIconView alloc] initWithFrame:iconFrame];
         self.cbBatteryIconView = bat;
         [self addSubview:bat];
     } else {
         self.cbBatteryIconView.hidden = NO;
-        self.cbBatteryIconView.frame = CGRectMake(0, 0, 32, 15);
+        self.cbBatteryIconView.frame = iconFrame;
     }
-    
-    // 居中微调
-    self.cbBatteryIconView.center = CGPointMake(width / 2.0f, (height / 2.0f) - 4.5f);
     [self bringSubviewToFront:self.cbBatteryIconView];
 
-    // 3. 底部百分比 Label (对齐 Cowbell 的精细字体与留白)
+    // 4. 配置百分比 Label
+    CGRect labelFrame = CGRectMake(0, startY + iconH + spacing, width, labelH);
     if (!self.cbPercentLabel) {
-        UILabel *lab = [[UILabel alloc] initWithFrame:CGRectMake(0, height - 16, width, 12)];
-        lab.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightMedium];
+        UILabel *lab = [[UILabel alloc] initWithFrame:labelFrame];
+        lab.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightMedium];
         lab.textAlignment = NSTextAlignmentCenter;
         lab.userInteractionEnabled = NO;
 
@@ -193,11 +199,11 @@
         [self addSubview:lab];
     } else {
         self.cbPercentLabel.hidden = NO;
-        self.cbPercentLabel.frame = CGRectMake(0, height - 16, width, 12);
+        self.cbPercentLabel.frame = labelFrame;
     }
     [self bringSubviewToFront:self.cbPercentLabel];
 
-    // 4. 刷新数据
+    // 5. 刷新状态
     [self cb_updateStateAndData];
 }
 
@@ -257,8 +263,6 @@
         if (strongSelf.cbPercentLabel) {
             int percent = (int)round(level * 100.0f);
             strongSelf.cbPercentLabel.text = [NSString stringWithFormat:@"%d%%", percent];
-            
-            // 开启低电量模式下，文字为深黑/灰，未开启时为纯白（对齐图1/图2）
             strongSelf.cbPercentLabel.textColor = isLowPowerMode ? [UIColor colorWithWhite:0.15 alpha:1.0] : [UIColor whiteColor];
         }
     });
