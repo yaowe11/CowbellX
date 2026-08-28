@@ -4,7 +4,7 @@
 
 @interface CCUICAPackageView : UIView
 - (BOOL)cb_isLowPowerPackage;
-- (void)cb_updateBatteryProgress;
+- (void)cb_updateBatteryFillLayer;
 @end
 
 @interface CCUIContentModuleContainerView : UIView
@@ -14,7 +14,7 @@
 - (BOOL)cb_isLowPowerModule;
 @end
 
-#pragma mark - 1. 劫持原生 CAPackage 图层实现 1% 平滑缩放
+#pragma mark - 1. 动态缩放原生 CAPackage 内部填充 Layer
 
 %hook CCUICAPackageView
 
@@ -22,15 +22,7 @@
     %orig;
 
     if ([self cb_isLowPowerPackage]) {
-        [self cb_updateBatteryProgress];
-    }
-}
-
-- (void)setStateName:(NSString *)stateName {
-    %orig;
-
-    if ([self cb_isLowPowerPackage]) {
-        [self cb_updateBatteryProgress];
+        [self cb_updateBatteryFillLayer];
     }
 }
 
@@ -48,25 +40,36 @@
 }
 
 %new
-- (void)cb_updateBatteryProgress {
+- (void)cb_updateBatteryFillLayer {
     dispatch_async(dispatch_get_main_queue(), ^{
         [UIDevice currentDevice].batteryMonitoringEnabled = YES;
         float level = [UIDevice currentDevice].batteryLevel;
         if (level < 0) level = 1.0f;
 
-        // 冻结原生 CALayer 动画播放，将电量百分比(0.0~1.0)直接映射为动画帧进度
-        self.layer.speed = 0.0;
-        
-        CFTimeInterval duration = self.layer.duration;
-        if (duration <= 0) duration = 1.0; // 防止未获取到 duration 时除零
-        
-        self.layer.timeOffset = level * duration;
+        // 递归查找名为 Fill / Level / Battery 的内部子图层
+        NSMutableArray *nodes = [NSMutableArray arrayWithObject:self.layer];
+        while (nodes.count > 0) {
+            CALayer *layer = [nodes firstObject];
+            [nodes removeObjectAtIndex:0];
+
+            NSString *name = layer.name.lowercaseString;
+            // 锁定原生 CAPackage 里的电量填充图层
+            if ([name containsString:@"fill"] || [name containsString:@"level"] || [name containsString:@"body"]) {
+                // 恢复默认矩阵后，按电量比例横向缩放 (X轴)
+                layer.transform = CATransform3DIdentity;
+                layer.transform = CATransform3DMakeScale(level, 1.0, 1.0);
+            }
+
+            if (layer.sublayers.count > 0) {
+                [nodes addObjectsFromArray:layer.sublayers];
+            }
+        }
     });
 }
 
 %end
 
-#pragma mark - 2. 渲染底部 81% 百分比 Label
+#pragma mark - 2. 底部百分比 Label
 
 %hook CCUIContentModuleContainerView
 
