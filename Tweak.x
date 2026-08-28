@@ -3,8 +3,10 @@
 #import <objc/runtime.h>
 
 @interface CCUICAPackageView : UIView
+- (id)publishedObjectWithName:(NSString *)name;
+- (NSArray *)publishedObjectNames;
 - (BOOL)cb_isLowPowerPackage;
-- (void)cb_updateBatteryFillLayer;
+- (void)cb_applyBatteryLevel;
 @end
 
 @interface CCUIContentModuleContainerView : UIView
@@ -14,7 +16,7 @@
 - (BOOL)cb_isLowPowerModule;
 @end
 
-#pragma mark - 1. 动态缩放原生 CAPackage 内部填充 Layer
+#pragma mark - 1. 动态挂载原生 CALayer 缩放
 
 %hook CCUICAPackageView
 
@@ -22,7 +24,15 @@
     %orig;
 
     if ([self cb_isLowPowerPackage]) {
-        [self cb_updateBatteryFillLayer];
+        [self cb_applyBatteryLevel];
+    }
+}
+
+- (void)setStateName:(NSString *)stateName {
+    %orig;
+
+    if ([self cb_isLowPowerPackage]) {
+        [self cb_applyBatteryLevel];
     }
 }
 
@@ -40,28 +50,48 @@
 }
 
 %new
-- (void)cb_updateBatteryFillLayer {
+- (void)cb_applyBatteryLevel {
     dispatch_async(dispatch_get_main_queue(), ^{
         [UIDevice currentDevice].batteryMonitoringEnabled = YES;
         float level = [UIDevice currentDevice].batteryLevel;
         if (level < 0) level = 1.0f;
 
-        // 递归查找名为 Fill / Level / Battery 的内部子图层
-        NSMutableArray *nodes = [NSMutableArray arrayWithObject:self.layer];
-        while (nodes.count > 0) {
-            CALayer *layer = [nodes firstObject];
-            [nodes removeObjectAtIndex:0];
+        // 方法 A：通过 CAPackage 暴露的官方 Key 精准调取填充图层
+        CALayer *fillLayer = nil;
+        if ([self respondsToSelector:@selector(publishedObjectWithName:)]) {
+            fillLayer = [self publishedObjectWithName:@"fill"];
+            if (!fillLayer) fillLayer = [self publishedObjectWithName:@"Level"];
+            if (!fillLayer) fillLayer = [self publishedObjectWithName:@"battery-fill"];
+            if (!fillLayer) fillLayer = [self publishedObjectWithName:@"battery"];
+        }
 
-            NSString *name = layer.name.lowercaseString;
-            // 锁定原生 CAPackage 里的电量填充图层
-            if ([name containsString:@"fill"] || [name containsString:@"level"] || [name containsString:@"body"]) {
-                // 恢复默认矩阵后，按电量比例横向缩放 (X轴)
-                layer.transform = CATransform3DIdentity;
-                layer.transform = CATransform3DMakeScale(level, 1.0, 1.0);
+        // 方法 B：如果方法 A 未命中，直接遍历根 Layer 下的所有叶子 CALayer
+        if (!fillLayer && self.layer.sublayers.count > 0) {
+            NSMutableArray *queue = [NSMutableArray arrayWithArray:self.layer.sublayers];
+            while (queue.count > 0) {
+                CALayer *ly = [queue firstObject];
+                [queue removeObjectAtIndex:0];
+                
+                // 筛选出非根节点且拥有几何形状的矢量 Shape/Model Layer
+                if (ly.sublayers.count == 0 && ([ly isKindOfClass:[CAShapeLayer class]] || [NSStringFromClass([ly class]) containsString:@"Vector"])) {
+                    fillLayer = ly;
+                    break;
+                }
+                if (ly.sublayers.count > 0) {
+                    [queue addObjectsFromArray:ly.sublayers];
+                }
             }
+        }
 
-            if (layer.sublayers.count > 0) {
-                [nodes addObjectsFromArray:layer.sublayers];
+        // 强行施加横向 1% 精度的 X 轴 Transform 矩阵缩放
+        if (fillLayer) {
+            fillLayer.transform = CATransform3DIdentity;
+            fillLayer.transform = CATransform3DMakeScale(level, 1.0, 1.0);
+        } else {
+            // 方法 C (终极兜底)：直接对整个 PackageView 的内部主 Layer 进行横向缩放裁剪
+            for (CALayer *sub in self.layer.sublayers) {
+                sub.transform = CATransform3DIdentity;
+                sub.transform = CATransform3DMakeScale(0.2f + (0.8f * level), 1.0, 1.0);
             }
         }
     });
@@ -69,7 +99,7 @@
 
 %end
 
-#pragma mark - 2. 底部百分比 Label
+#pragma mark - 2. 底部百分比显示
 
 %hook CCUIContentModuleContainerView
 
