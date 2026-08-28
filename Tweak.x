@@ -1,7 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-#pragma mark - 1. 自定义贝塞尔电池 View (大幅加大尺寸 + 开启低电量变黄)
+#pragma mark - 1. Cowbell 1:1 贝塞尔绘制电池 View
 
 @interface CBCustomBatteryIconView : UIView
 @property (nonatomic, assign) float batteryLevel;
@@ -43,33 +43,36 @@
     CGContextSetShouldAntialias(context, YES);
     CGContextSetAllowsAntialiasing(context, YES);
 
-    // 核心配色：开启低电量显示亮黄色，未开启显示白色
-    UIColor *themeColor = self.isLowPowerMode ? [UIColor systemYellowColor] : [UIColor whiteColor];
+    // 配色逻辑完全对齐 Cowbell：
+    // 低电量开启（图1）：外框/极耳为黑色，内部填充为黄色
+    // 低电量关闭（图2）：外框/极耳/内部填充均为白色
+    UIColor *strokeColor = self.isLowPowerMode ? [UIColor blackColor] : [UIColor whiteColor];
+    UIColor *fillColor   = self.isLowPowerMode ? [UIColor systemYellowColor] : [UIColor whiteColor];
 
     // 1. 电池外壳
-    CGFloat bodyWidth = rect.size.width - 4.5f; // 给极耳留 4.5px
+    CGFloat bodyWidth = rect.size.width - 3.5f; 
     CGFloat bodyHeight = rect.size.height;
-    CGRect bodyRect = CGRectMake(1.0f, 1.0f, bodyWidth - 2.0f, bodyHeight - 2.0f);
+    CGRect bodyRect = CGRectMake(0.75f, 0.75f, bodyWidth - 1.5f, bodyHeight - 1.5f);
     
-    UIBezierPath *outlinePath = [UIBezierPath bezierPathWithRoundedRect:bodyRect cornerRadius:4.5f];
-    outlinePath.lineWidth = 1.8f; // 加粗外框线条
-    [themeColor setStroke];
+    UIBezierPath *outlinePath = [UIBezierPath bezierPathWithRoundedRect:bodyRect cornerRadius:3.5f];
+    outlinePath.lineWidth = 1.3f; // 对齐 Cowbell 纤细干净的外框
+    [strokeColor setStroke];
     [outlinePath stroke];
 
     // 2. 电池极耳 (Cap)
-    CGFloat capWidth = 2.5f;
-    CGFloat capHeight = bodyHeight * 0.42f;
-    CGFloat capX = bodyWidth + 0.8f;
+    CGFloat capWidth = 1.8f;
+    CGFloat capHeight = bodyHeight * 0.40f;
+    CGFloat capX = bodyWidth + 0.5f;
     CGFloat capY = (bodyHeight - capHeight) / 2.0f;
     
     UIBezierPath *capPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(capX, capY, capWidth, capHeight)
                                                   byRoundingCorners:(UIRectCornerTopRight | UIRectCornerBottomRight)
-                                                        cornerRadii:CGSizeMake(1.5, 1.5)];
-    [themeColor setFill];
+                                                        cornerRadii:CGSizeMake(1.2, 1.2)];
+    [strokeColor setFill];
     [capPath fill];
 
     // 3. 内部电量填充
-    CGFloat padding = 2.5f;
+    CGFloat padding = 2.0f;
     CGFloat maxFillWidth = bodyRect.size.width - (padding * 2.0f);
     CGFloat fillHeight = bodyRect.size.height - (padding * 2.0f);
     
@@ -77,11 +80,11 @@
     if (level < 0.0f) level = 1.0f;
     if (level > 1.0f) level = 1.0f;
     
-    CGFloat actualFillWidth = MAX(2.5f, maxFillWidth * level);
+    CGFloat actualFillWidth = MAX(1.5f, maxFillWidth * level);
     CGRect fillRect = CGRectMake(bodyRect.origin.x + padding, bodyRect.origin.y + padding, actualFillWidth, fillHeight);
     
-    UIBezierPath *fillPath = [UIBezierPath bezierPathWithRoundedRect:fillRect cornerRadius:2.0f];
-    [themeColor setFill];
+    UIBezierPath *fillPath = [UIBezierPath bezierPathWithRoundedRect:fillRect cornerRadius:1.5f];
+    [fillColor setFill];
     [fillPath fill];
 }
 
@@ -165,24 +168,24 @@
         }
     }
 
-    // 2. 电池尺寸大幅加大至 38x18
+    // 2. 电池尺寸对齐 Cowbell 比例 (32x15)
     if (!self.cbBatteryIconView) {
-        CBCustomBatteryIconView *bat = [[CBCustomBatteryIconView alloc] initWithFrame:CGRectMake(0, 0, 38, 18)];
+        CBCustomBatteryIconView *bat = [[CBCustomBatteryIconView alloc] initWithFrame:CGRectMake(0, 0, 32, 15)];
         self.cbBatteryIconView = bat;
         [self addSubview:bat];
     } else {
         self.cbBatteryIconView.hidden = NO;
-        self.cbBatteryIconView.frame = CGRectMake(0, 0, 38, 18);
+        self.cbBatteryIconView.frame = CGRectMake(0, 0, 32, 15);
     }
     
-    // Y 轴微调定位：居中偏上，给底部 100% 预留完美留白
-    self.cbBatteryIconView.center = CGPointMake(width / 2.0f, (height / 2.0f) - 5.0f);
+    // 居中微调
+    self.cbBatteryIconView.center = CGPointMake(width / 2.0f, (height / 2.0f) - 4.5f);
     [self bringSubviewToFront:self.cbBatteryIconView];
 
-    // 3. 底部百分比 Label
+    // 3. 底部百分比 Label (对齐 Cowbell 的精细字体与留白)
     if (!self.cbPercentLabel) {
         UILabel *lab = [[UILabel alloc] initWithFrame:CGRectMake(0, height - 16, width, 12)];
-        lab.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightBold];
+        lab.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightMedium];
         lab.textAlignment = NSTextAlignmentCenter;
         lab.userInteractionEnabled = NO;
 
@@ -194,7 +197,7 @@
     }
     [self bringSubviewToFront:self.cbPercentLabel];
 
-    // 4. 刷新状态
+    // 4. 刷新数据
     [self cb_updateStateAndData];
 }
 
@@ -254,8 +257,9 @@
         if (strongSelf.cbPercentLabel) {
             int percent = (int)round(level * 100.0f);
             strongSelf.cbPercentLabel.text = [NSString stringWithFormat:@"%d%%", percent];
-            // 开启低电量模式，文字跟着变黄，否则为白色
-            strongSelf.cbPercentLabel.textColor = isLowPowerMode ? [UIColor systemYellowColor] : [UIColor whiteColor];
+            
+            // 开启低电量模式下，文字为深黑/灰，未开启时为纯白（对齐图1/图2）
+            strongSelf.cbPercentLabel.textColor = isLowPowerMode ? [UIColor colorWithWhite:0.15 alpha:1.0] : [UIColor whiteColor];
         }
     });
 }
