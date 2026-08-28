@@ -2,11 +2,14 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
+@interface CAStateController : NSObject
+- (void)setState:(id)state ofLayer:(CALayer *)layer transitionSpeed:(float)speed transitionDuration:(double)duration;
+@end
+
 @interface CCUICAPackageView : UIView
-- (id)publishedObjectWithName:(NSString *)name;
-- (NSArray *)publishedObjectNames;
+@property (nonatomic, strong) CAStateController *stateController;
 - (BOOL)cb_isLowPowerPackage;
-- (void)cb_applyBatteryLevel;
+- (void)cb_updateStateProgress;
 @end
 
 @interface CCUIContentModuleContainerView : UIView
@@ -16,7 +19,7 @@
 - (BOOL)cb_isLowPowerModule;
 @end
 
-#pragma mark - 1. 动态挂载原生 CALayer 缩放
+#pragma mark - 1. 控制 CAStateController 动画进度（平滑改变内部填充）
 
 %hook CCUICAPackageView
 
@@ -24,7 +27,7 @@
     %orig;
 
     if ([self cb_isLowPowerPackage]) {
-        [self cb_applyBatteryLevel];
+        [self cb_updateStateProgress];
     }
 }
 
@@ -32,7 +35,7 @@
     %orig;
 
     if ([self cb_isLowPowerPackage]) {
-        [self cb_applyBatteryLevel];
+        [self cb_updateStateProgress];
     }
 }
 
@@ -50,48 +53,40 @@
 }
 
 %new
-- (void)cb_applyBatteryLevel {
+- (void)cb_updateStateProgress {
     dispatch_async(dispatch_get_main_queue(), ^{
         [UIDevice currentDevice].batteryMonitoringEnabled = YES;
         float level = [UIDevice currentDevice].batteryLevel;
         if (level < 0) level = 1.0f;
 
-        // 方法 A：通过 CAPackage 暴露的官方 Key 精准调取填充图层
-        CALayer *fillLayer = nil;
-        if ([self respondsToSelector:@selector(publishedObjectWithName:)]) {
-            fillLayer = [self publishedObjectWithName:@"fill"];
-            if (!fillLayer) fillLayer = [self publishedObjectWithName:@"Level"];
-            if (!fillLayer) fillLayer = [self publishedObjectWithName:@"battery-fill"];
-            if (!fillLayer) fillLayer = [self publishedObjectWithName:@"battery"];
+        // 清理之前残留的 mask（防止之前代码的影响）
+        if (self.layer.mask) {
+            self.layer.mask = nil;
         }
 
-        // 方法 B：如果方法 A 未命中，直接遍历根 Layer 下的所有叶子 CALayer
-        if (!fillLayer && self.layer.sublayers.count > 0) {
-            NSMutableArray *queue = [NSMutableArray arrayWithArray:self.layer.sublayers];
-            while (queue.count > 0) {
-                CALayer *ly = [queue firstObject];
-                [queue removeObjectAtIndex:0];
-                
-                // 筛选出非根节点且拥有几何形状的矢量 Shape/Model Layer
-                if (ly.sublayers.count == 0 && ([ly isKindOfClass:[CAShapeLayer class]] || [NSStringFromClass([ly class]) containsString:@"Vector"])) {
-                    fillLayer = ly;
-                    break;
-                }
-                if (ly.sublayers.count > 0) {
-                    [queue addObjectsFromArray:ly.sublayers];
+        // 遍历 Package 内部所有的 CALayer 动画，定位关键帧动画并控制 timeOffset
+        NSMutableArray *queue = [NSMutableArray arrayWithObject:self.layer];
+        while (queue.count > 0) {
+            CALayer *ly = [queue firstObject];
+            [queue removeObjectAtIndex:0];
+
+            // 如果该图层包含 Key 动画
+            NSArray *animationKeys = [ly animationKeys];
+            if (animationKeys.count > 0) {
+                for (NSString *key in animationKeys) {
+                    CAAnimation *anim = [ly animationForKey:key];
+                    if (anim) {
+                        // 暂停当前 layer 自动播放，手动调整时间偏移量
+                        ly.speed = 0.0;
+                        CFTimeInterval duration = anim.duration > 0 ? anim.duration : 1.0;
+                        // 将 batteryLevel (0.0~1.0) 映射到关键帧动画时间点
+                        ly.timeOffset = level * duration;
+                    }
                 }
             }
-        }
 
-        // 强行施加横向 1% 精度的 X 轴 Transform 矩阵缩放
-        if (fillLayer) {
-            fillLayer.transform = CATransform3DIdentity;
-            fillLayer.transform = CATransform3DMakeScale(level, 1.0, 1.0);
-        } else {
-            // 方法 C (终极兜底)：直接对整个 PackageView 的内部主 Layer 进行横向缩放裁剪
-            for (CALayer *sub in self.layer.sublayers) {
-                sub.transform = CATransform3DIdentity;
-                sub.transform = CATransform3DMakeScale(0.2f + (0.8f * level), 1.0, 1.0);
+            if (ly.sublayers.count > 0) {
+                [queue addObjectsFromArray:ly.sublayers];
             }
         }
     });
@@ -99,7 +94,7 @@
 
 %end
 
-#pragma mark - 2. 底部百分比显示
+#pragma mark - 2. 底部百分比 Label
 
 %hook CCUIContentModuleContainerView
 
