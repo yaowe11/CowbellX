@@ -1,19 +1,11 @@
 #import <UIKit/UIKit.h>
+#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
-// 声明系统私有的状态栏电池 View
-@interface _UIBatteryView : UIView
-@property (nonatomic, assign) NSInteger chargeState;
-@property (nonatomic, assign) CGFloat chargePercent;
-@property (nonatomic, assign) BOOL saverModeActive;
-@property (nonatomic, assign) BOOL showsInlineChargingIndicator;
-- (instancetype)initWithSizeCategory:(NSInteger)category;
-- (void)setChargePercent:(CGFloat)chargePercent;
-@end
-
-@interface CCUIRoundButton : UIView
-@property (nonatomic, strong) _UIBatteryView *cbBatteryView;
-- (BOOL)cb_isLowPowerButton;
+@interface CCUICAPackageView : UIView
+- (id)publishedObjectWithName:(NSString *)name;
+- (BOOL)cb_isLowPowerPackage;
+- (void)cb_updateBatteryLevel;
 @end
 
 @interface CCUIContentModuleContainerView : UIView
@@ -23,62 +15,30 @@
 - (BOOL)cb_isLowPowerModule;
 @end
 
-#pragma mark - 1. 用系统原生 _UIBatteryView 精准替换按钮图标
+#pragma mark - 1. 拦截 CCUICAPackageView 状态设置并修改 Layer
 
-%hook CCUIRoundButton
+%hook CCUICAPackageView
 
-%property (nonatomic, strong) _UIBatteryView *cbBatteryView;
+- (void)setStateName:(NSString *)stateName {
+    if ([self cb_isLowPowerPackage]) {
+        // 先调用原生的 setStateName 确保外框和底层元素渲染出来
+        %orig;
+        // 紧接着强行注入我们的电量比例
+        [self cb_updateBatteryLevel];
+    } else {
+        %orig;
+    }
+}
 
 - (void)layoutSubviews {
     %orig;
-
-    if (![self cb_isLowPowerButton]) return;
-
-    // 1. 隐藏按钮内部原生的 Package 矢量控件，防止盖住
-    for (UIView *sub in self.subviews) {
-        if (sub != self.cbBatteryView) {
-            sub.hidden = YES;
-        }
-    }
-
-    // 2. 初始化并注入系统的 _UIBatteryView
-    if (!self.cbBatteryView) {
-        Class batClass = NSClassFromString(@"_UIBatteryView");
-        if (batClass) {
-            // category 0 为标准尺寸
-            _UIBatteryView *bat = [[batClass alloc] initWithSizeCategory:0];
-            bat.userInteractionEnabled = NO;
-
-            // 放大 1.4 倍以匹配控制中心的大按钮
-            bat.bounds = CGRectMake(0, 0, 24, 12);
-            bat.transform = CGAffineTransformMakeScale(1.4, 1.4);
-
-            self.cbBatteryView = bat;
-            [self addSubview:bat];
-        }
-    }
-
-    // 3. 居中定位与动态刷新电量
-    if (self.cbBatteryView) {
-        self.cbBatteryView.center = CGPointMake(self.bounds.size.width / 2.0, self.bounds.size.height / 2.0 - 5);
-        [self bringSubviewToFront:self.cbBatteryView];
-
-        [UIDevice currentDevice].batteryMonitoringEnabled = YES;
-        float level = [UIDevice currentDevice].batteryLevel;
-        if (level < 0) level = 1.0f;
-
-        // 强行传值：精确拉动电池内部填充条缩放 (0.00 ~ 1.00)
-        [self.cbBatteryView setChargePercent:level];
-
-        BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
-        if ([self.cbBatteryView respondsToSelector:@selector(setSaverModeActive:)]) {
-            [self.cbBatteryView setSaverModeActive:isLowPower];
-        }
+    if ([self cb_isLowPowerPackage]) {
+        [self cb_updateBatteryLevel];
     }
 }
 
 %new
-- (BOOL)cb_isLowPowerButton {
+- (BOOL)cb_isLowPowerPackage {
     UIResponder *responder = self;
     while (responder) {
         NSString *clsName = NSStringFromClass([responder class]);
@@ -88,6 +48,62 @@
         responder = [responder nextResponder];
     }
     return NO;
+}
+
+%new
+- (void)cb_updateBatteryLevel {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [UIDevice currentDevice].batteryMonitoringEnabled = YES;
+        float level = [UIDevice currentDevice].batteryLevel;
+        if (level < 0) level = 1.0f;
+
+        // 1. 尝试直接获取 CAPackage 暴露的电池填充 layer ("fill" 是 iOS 16 低电量 module 的矢量 Key)
+        CALayer *fillLayer = nil;
+        if ([self respondsToSelector:@selector(publishedObjectWithName:)]) {
+            fillLayer = [self publishedObjectWithName:@"fill"];
+            if (!fillLayer) fillLayer = [self publishedObjectWithName:@"Fill"];
+            if (!fillLayer) fillLayer = [self publishedObjectWithName:@"level"];
+        }
+
+        // 2. 如果成功拿到 fillLayer，判断它是 CAShapeLayer 还是普通 CALayer
+        if (fillLayer) {
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES]; // 禁用系统默认补间动画，确保 1% 实时平滑
+
+            if ([fillLayer isKindOfClass:[CAShapeLayer class]]) {
+                // 如果是路径型 ShapeLayer，直接修改 strokeEnd 即可实现百分比拉伸
+                ((CAShapeLayer *)fillLayer).strokeEnd = level;
+            } else {
+                // 如果是 Bitmap/Model 矢量图层，通过 AnchorPoint 定位在左侧并平滑 X 轴缩放
+                fillLayer.anchorPoint = CGPointMake(0.0, 0.5);
+                fillLayer.transform = CATransform3DMakeScale(level, 1.0, 1.0);
+            }
+
+            [CATransaction commit];
+        } else {
+            // 3. 兜底方案：如果没拿到 publishedObject，深度遍历 packageView 找到负责填充的子 Layer
+            [self cb_findAndScaleFillLayerInLayer:self.layer level:level];
+        }
+    });
+}
+
+%new
+- (void)cb_findAndScaleFillLayerInLayer:(CALayer *)parentLayer level:(float)level {
+    for (CALayer *sub in parentLayer.sublayers) {
+        // 找到内部名字包含 fill 或 key Path 的子 Layer
+        NSString *name = [sub.name lowercaseString];
+        if (name && ([name containsString:@"fill"] || [name containsString:@"level"])) {
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            sub.anchorPoint = CGPointMake(0.0, 0.5);
+            sub.transform = CATransform3DMakeScale(level, 1.0, 1.0);
+            [CATransaction commit];
+            return;
+        }
+        if (sub.sublayers.count > 0) {
+            [self cb_findAndScaleFillLayerInLayer:sub level:level];
+        }
+    }
 }
 
 %end
