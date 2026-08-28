@@ -6,17 +6,91 @@
 @property (nonatomic, strong) UILabel *cbPercentLabel;
 - (void)cb_updatePercentText;
 - (BOOL)cb_isLowPowerModule;
-- (UIImageView *)cb_findActualGlyphImageViewInView:(UIView *)view;
 @end
 
 @interface CCUIRoundButton : UIView
 @property (nonatomic, strong) UIImageView *glyphImageView;
+- (void)cb_updateBatteryIcon;
 @end
 
-@interface CCUILabeledRoundButtonViewController : UIViewController
-@property (nonatomic, strong) CCUIRoundButton *buttonContainer;
-@property (nonatomic, strong) UIImageView *glyphImageView;
-@end
+// 精确控制原生图标 1% 变化的函数
+static void UpdateRoundButtonBatteryIcon(CCUIRoundButton *button) {
+    if (!button) return;
+    
+    UIImageView *imageView = nil;
+    if ([button respondsToSelector:@selector(glyphImageView)]) {
+        imageView = button.glyphImageView;
+    }
+    
+    if (!imageView) {
+        for (UIView *sub in button.subviews) {
+            if ([sub isKindOfClass:[UIImageView class]]) {
+                imageView = (UIImageView *)sub;
+                break;
+            }
+        }
+    }
+    
+    if (!imageView) return;
+
+    [UIDevice currentDevice].batteryMonitoringEnabled = YES;
+    float level = [UIDevice currentDevice].batteryLevel;
+    int percent = (level >= 0) ? (int)round(level * 100.0f) : 100;
+
+    // 1. 使用系统原生满电 SF Symbol 作为纯净基础图标
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightMedium];
+    UIImage *baseSymbol = [UIImage systemImageNamed:@"battery.100" withConfiguration:config];
+    if (baseSymbol) {
+        imageView.image = baseSymbol;
+    }
+
+    // 2. 用 CAShapeLayer 作为 Mask 动态裁剪内部填充宽度（实现 1% 实时平滑变化）
+    // 保留最左侧外框，根据百分比缩放右侧填充
+    CAShapeLayer *maskLayer = (CAShapeLayer *)imageView.layer.mask;
+    if (![maskLayer isKindOfClass:[CAShapeLayer class]]) {
+        maskLayer = [CAShapeLayer layer];
+        imageView.layer.mask = maskLayer;
+    }
+
+    CGFloat imgW = imageView.bounds.size.width > 0 ? imageView.bounds.size.width : 26;
+    CGFloat imgH = imageView.bounds.size.height > 0 ? imageView.bounds.size.height : 13;
+
+    // 计算内部电量块的缩放比：保留外框（约20%宽度），剩余80%宽度按 1% 准确裁剪
+    CGFloat p = fmaxf(0.0f, fminf(1.0f, (float)percent / 100.0f));
+    CGFloat visibleWidth = imgW * (0.20f + 0.80f * p);
+
+    UIBezierPath *path = [UIBezierPath bezierPathWithRect:CGRectMake(0, 0, visibleWidth, imgH)];
+    maskLayer.path = path.CGPath;
+}
+
+%hook CCUIRoundButton
+
+- (void)layoutSubviews {
+    %orig;
+    
+    // 检查父级链是否属于低电量模块
+    UIResponder *responder = self;
+    BOOL isLowPower = NO;
+    while (responder) {
+        NSString *clsName = NSStringFromClass([responder class]);
+        if ([clsName containsString:@"LowPower"]) {
+            isLowPower = YES;
+            break;
+        }
+        responder = [responder nextResponder];
+    }
+
+    if (isLowPower) {
+        [self cb_updateBatteryIcon];
+    }
+}
+
+%new
+- (void)cb_updateBatteryIcon {
+    UpdateRoundButtonBatteryIcon(self);
+}
+
+%end
 
 %hook CCUIContentModuleContainerView
 
@@ -95,24 +169,6 @@
 }
 
 %new
-- (UIImageView *)cb_findActualGlyphImageViewInView:(UIView *)view {
-    if (!view || view == self.cbPercentLabel) return nil;
-    
-    if ([view isKindOfClass:[UIImageView class]]) {
-        CGSize s = view.bounds.size;
-        if (s.width > 10 && s.width < 40 && s.height > 10 && s.height < 40) {
-            return (UIImageView *)view;
-        }
-    }
-    
-    for (UIView *sub in view.subviews) {
-        UIImageView *found = [self cb_findActualGlyphImageViewInView:sub];
-        if (found) return found;
-    }
-    return nil;
-}
-
-%new
 - (void)cb_updatePercentText {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!self.cbPercentLabel) return;
@@ -126,28 +182,6 @@
             self.cbPercentLabel.textColor = [UIColor blackColor];
         } else {
             self.cbPercentLabel.textColor = [UIColor whiteColor];
-        }
-
-        UIImageView *glyphImageView = [self cb_findActualGlyphImageViewInView:self];
-        if (glyphImageView) {
-            NSString *symbolName = @"battery.100";
-            if (percent <= 15) {
-                symbolName = @"battery.0";
-            } else if (percent <= 40) {
-                symbolName = @"battery.25";
-            } else if (percent <= 65) {
-                symbolName = @"battery.50";
-            } else if (percent <= 88) {
-                symbolName = @"battery.75";
-            }
-
-            UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightMedium];
-            UIImage *nativeSymbol = [UIImage systemImageNamed:symbolName withConfiguration:config];
-
-            if (nativeSymbol) {
-                glyphImageView.image = nativeSymbol;
-                glyphImageView.contentMode = UIViewContentModeScaleAspectFit;
-            }
         }
     });
 }
