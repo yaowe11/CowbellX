@@ -4,6 +4,7 @@
 @interface CCUIContentModuleContainerView : UIView
 @property (nonatomic, strong) NSString *moduleIdentifier;
 @property (nonatomic, strong) UILabel *cbPercentLabel;
+@property (nonatomic, assign, getter=isExpanded) BOOL expanded; // 系统自带的展开状态属性
 - (void)cb_updatePercentText;
 - (BOOL)cb_isLowPowerModule;
 @end
@@ -26,16 +27,27 @@
     CGFloat width = self.bounds.size.width;
     CGFloat height = self.bounds.size.height;
 
-    if (width <= 0 || height <= 0 || width > 100 || height > 100) return;
+    // 2. 核心修复：如果是二级菜单/展开状态，或者尺寸超过了标准小模块，直接隐藏百分比
+    BOOL isExpanded = NO;
+    if ([self respondsToSelector:@selector(isExpanded)]) {
+        isExpanded = self.isExpanded;
+    }
 
-    // 2. 电池图标完全保持原生位置，不动它
+    if (isExpanded || width > 85.0f || height > 85.0f || width <= 0 || height <= 0) {
+        if (self.cbPercentLabel) {
+            self.cbPercentLabel.hidden = YES;
+        }
+        return;
+    }
+
+    // 3. 电池图标保持原生位置
     for (UIView *subview in self.subviews) {
         if (subview != self.cbPercentLabel) {
             subview.transform = CGAffineTransformIdentity;
         }
     }
 
-    // 3. 布局 Label：字号 9.5pt Regular，完美匹配原生比例
+    // 4. 正常小模块形态下显示并布局 Label（9.5pt Regular，Y轴 height - 20）
     if (!self.cbPercentLabel) {
         UILabel *lab = [[UILabel alloc] initWithFrame:CGRectMake(0, height - 20.0f, width, 12.0f)];
         lab.font = [UIFont systemFontOfSize:9.5f weight:UIFontWeightRegular];
