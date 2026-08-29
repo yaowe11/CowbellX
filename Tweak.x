@@ -1,104 +1,144 @@
 #import <UIKit/UIKit.h>
 
-@interface CCUIRoundButtonViewController : UIViewController
-@property (nonatomic, strong) UILabel *cb_percentLabel;
-@property (nonatomic, strong) UIImageView *cb_batteryIconView;
-- (void)cb_updatePercent;
+@interface CCUICAPackageView : UIView
+@property (nonatomic, copy) NSString *packageName;
 @end
 
-%hook CCUIRoundButtonViewController
+@interface CBCustomBatteryView : UIView
+@property (nonatomic, strong) UIView *fillView;
+@property (nonatomic, strong) UILabel *percentLabel;
+- (void)updateBatteryData;
+@end
 
-%property (nonatomic, strong) UILabel *cb_percentLabel;
-%property (nonatomic, strong) UIImageView *cb_batteryIconView;
+@implementation CBCustomBatteryView
 
-- (void)viewDidLoad {
-    %orig;
+- (instancetype)initWithFrame:(CGRect)frame {
+    if (self = [super initWithFrame:frame]) {
+        self.userInteractionEnabled = NO;
+        self.backgroundColor = [UIColor clearColor];
+        
+        _fillView = [[UIView alloc] init];
+        _fillView.layer.cornerRadius = 2.0f;
+        _fillView.clipsToBounds = YES;
+        [self addSubview:_fillView];
 
-    NSString *className = NSStringFromClass([self class]);
-    NSString *title = [self respondsToSelector:@selector(title)] ? [self performSelector:@selector(title)] : @"";
-    BOOL isLowPower = [className containsString:@"LowPower"] || [title containsString:@"低电量"];
+        _percentLabel = [[UILabel alloc] init];
+        _percentLabel.font = [UIFont systemFontOfSize:9.3f weight:UIFontWeightRegular];
+        _percentLabel.textAlignment = NSTextAlignmentCenter;
+        [self addSubview:_percentLabel];
 
-    if (isLowPower && !self.cb_percentLabel) {
-        // 1. 创建动态电池 SF Symbol 图标
-        self.cb_batteryIconView = [[UIImageView alloc] init];
-        self.cb_batteryIconView.contentMode = UIViewContentModeScaleAspectFit;
-        [self.view addSubview:self.cb_batteryIconView];
-
-        // 2. 创建电量/容量百分比文字
-        self.cb_percentLabel = [[UILabel alloc] init];
-        self.cb_percentLabel.font = [UIFont systemFontOfSize:9.0f weight:UIFontWeightBold];
-        self.cb_percentLabel.textAlignment = NSTextAlignmentCenter;
-        [self.view addSubview:self.cb_percentLabel];
-
-        // 监听电量广播
         [UIDevice currentDevice].batteryMonitoringEnabled = YES;
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(cb_updatePercent)
-                                                     name:UIDeviceBatteryLevelDidChangeNotification
-                                                   object:nil];
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(cb_updatePercent)
-                                                     name:NSProcessInfoPowerStateDidChangeNotification
-                                                   object:nil];
-        [self cb_updatePercent];
+        NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+        [nc addObserver:self selector:@selector(updateBatteryData) name:UIDeviceBatteryLevelDidChangeNotification object:nil];
+        [nc addObserver:self selector:@selector(updateBatteryData) name:NSProcessInfoPowerStateDidChangeNotification object:nil];
     }
+    return self;
 }
 
-- (void)viewDidLayoutSubviews {
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)updateBatteryData {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (![UIDevice currentDevice].isBatteryMonitoringEnabled) {
+            [UIDevice currentDevice].batteryMonitoringEnabled = YES;
+        }
+        [self setNeedsLayout];
+        [self setNeedsDisplay];
+    });
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    
+    CGFloat w = self.bounds.size.width, h = self.bounds.size.height;
+    if (w <= 0 || h <= 0) return;
+
+    float level = [UIDevice currentDevice].batteryLevel;
+    if (level < 0) level = 1.0f;
+    
+    self.percentLabel.text = [NSString stringWithFormat:@"%d%%", (int)round(level * 100)];
+
+    BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
+    UIColor *themeColor = isLowPower ? [UIColor colorWithRed:1.0 green:0.8 blue:0.0 alpha:1.0] : [UIColor whiteColor];
+    
+    self.percentLabel.textColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
+    self.fillView.backgroundColor = themeColor;
+
+    CGFloat totalW = 32.0f, iconH = 14.0f;
+    CGFloat iconX = (w - totalW) / 2.0f, iconY = (h - iconH) / 2.0f - 1.0f; 
+    CGFloat bodyW = totalW - 3.3f, padding = 2.0f;
+
+    CGFloat currentFillW = (bodyW - padding * 2.0f) * level;
+    if (currentFillW < 2.0f) currentFillW = 2.0f;
+    
+    self.fillView.frame = CGRectMake(iconX + padding, iconY + padding, currentFillW, iconH - padding * 2.0f);
+    self.percentLabel.frame = CGRectMake(0, iconY + iconH + 5.5f, w, 11.0f);
+}
+
+- (void)drawRect:(CGRect)rect {
+    [super drawRect:rect];
+    
+    CGFloat w = self.bounds.size.width, h = self.bounds.size.height;
+    if (w <= 0 || h <= 0) return;
+
+    CGFloat totalW = 32.0f, iconH = 14.0f;
+    CGFloat iconX = (w - totalW) / 2.0f, iconY = (h - iconH) / 2.0f - 1.0f;
+
+    BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
+    UIColor *strokeColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
+
+    CGFloat bodyW = totalW - 3.3f;
+    UIBezierPath *bodyPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX, iconY, bodyW, iconH) cornerRadius:4.2f];
+    bodyPath.lineWidth = 1.4f;
+    [strokeColor setStroke];
+    [bodyPath stroke];
+    
+    CGFloat capW = 1.8f, capH = 4.8f, capX = iconX + bodyW + 1.5f, capY = iconY + (iconH - capH) / 2.0f;
+    UIBezierPath *capPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(capX, capY, capW, capH)
+                                                  byRoundingCorners:(UIRectCornerTopRight | UIRectCornerBottomRight)
+                                                        cornerRadii:CGSizeMake(1.2f, 1.2f)];
+    [strokeColor setFill];
+    [capPath fill];
+}
+
+@end
+
+%hook CCUICAPackageView
+
+- (void)layoutSubviews {
     %orig;
 
-    if (self.cb_percentLabel && self.cb_batteryIconView) {
-        CGFloat w = self.view.bounds.size.width;
-        CGFloat h = self.view.bounds.size.height;
+    NSString *pkgName = [self respondsToSelector:@selector(packageName)] ? self.packageName : @"";
+    BOOL isLowPower = [pkgName containsString:@"LowPower"] || [pkgName containsString:@"Battery"];
 
-        if (w > 0 && h > 0) {
-            BOOL isSelected = [NSProcessInfo processInfo].isLowPowerModeEnabled;
-            UIColor *themeColor = isSelected ? [UIColor colorWithWhite:0.1 alpha:1.0] : [UIColor whiteColor];
-
-            // 布局电池图标（置于上半部分）
-            self.cb_batteryIconView.frame = CGRectMake((w - 24.0f) / 2.0f, h * 0.22f, 24.0f, 14.0f);
-            self.cb_batteryIconView.tintColor = themeColor;
-
-            // 布局文字（置于图标下方）
-            [self.cb_percentLabel sizeToFit];
-            CGFloat lblW = self.cb_percentLabel.bounds.size.width;
-            CGFloat lblH = self.cb_percentLabel.bounds.size.height;
-            self.cb_percentLabel.frame = CGRectMake((w - lblW) / 2.0f, h * 0.65f, lblW, lblH);
-            self.cb_percentLabel.textColor = themeColor;
+    if (!isLowPower) {
+        for (UIResponder *r = self; r; r = r.nextResponder) {
+            NSString *cls = NSStringFromClass([r class]);
+            if ([cls containsString:@"Brightness"] || [cls containsString:@"Display"]) return;
+            if ([cls containsString:@"LowPower"]) { isLowPower = YES; break; }
         }
     }
-}
 
-%new
-- (void)cb_updatePercent {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        float level = [UIDevice currentDevice].batteryLevel;
-        if (level < 0) level = 1.0f;
-        int percent = (int)round(level * 100);
+    if (!isLowPower) return;
 
-        if (self.cb_batteryIconView && self.cb_percentLabel) {
-            // 根据百分比选择最匹配的原生 SF Symbol 图标名
-            NSString *symbolName = @"battery.100";
-            if (percent <= 10) {
-                symbolName = @"battery.0";
-            } else if (percent <= 35) {
-                symbolName = @"battery.25";
-            } else if (percent <= 65) {
-                symbolName = @"battery.50";
-            } else if (percent <= 85) {
-                symbolName = @"battery.75";
-            }
+    for (UIView *subview in self.subviews) {
+        if (subview.tag != 9999) subview.alpha = 0.0f;
+    }
 
-            UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:14 weight:UIImageSymbolWeightMedium];
-            self.cb_batteryIconView.image = [UIImage systemImageNamed:symbolName withConfiguration:config];
+    self.backgroundColor = [UIColor clearColor];
 
-            // 显示电量与容量（以 3200mAh 为例）
-            int mAh = (int)round(level * 3200);
-            self.cb_percentLabel.text = [NSString stringWithFormat:@"%d%% · %dmAh", percent, mAh];
+    CBCustomBatteryView *batteryView = [self viewWithTag:9999];
+    if (!batteryView) {
+        batteryView = [[CBCustomBatteryView alloc] initWithFrame:self.bounds];
+        batteryView.tag = 9999;
+        [self addSubview:batteryView];
+    }
 
-            [self.view setNeedsLayout];
-        }
-    });
+    batteryView.frame = self.bounds;
+    batteryView.alpha = 1.0f;
+    [batteryView updateBatteryData];
 }
 
 %end
