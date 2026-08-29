@@ -1,34 +1,61 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
+#import <Photos/Photos.h>
 
 @interface CCUICAPackageView : UIView
-// 在接口里声明新增的递归方法，防止 Clang 编译报错
-- (void)cb_logLayers:(CALayer *)layer depth:(int)depth;
+- (NSString *)cb_dumpLayers:(CALayer *)layer depth:(int)depth;
 @end
 
 %hook CCUICAPackageView
 
 - (void)setState:(NSString *)state animated:(BOOL)animated {
     %orig;
-    
-    // 自动遍历并打印内部所有图层
-    [self cb_logLayers:self.layer depth:0];
+
+    // 1. 抓取层级文本
+    NSString *hierarchy = [self cb_dumpLayers:self.layer depth:0];
+
+    // 2. 将图标 View 渲染为图片保存到相册
+    UIGraphicsBeginImageContextWithOptions(self.bounds.size, NO, 0.0);
+    [self.layer renderInContext:UIGraphicsGetCurrentContext()];
+    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+
+    if (image) {
+        [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+            [PHAssetChangeRequest creationRequestForAssetFromImage:image];
+        } completionHandler:nil];
+    }
+
+    // 3. 屏幕弹窗显示抓取到的图层树
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *rootVC = [UIApplication sharedApplication].keyWindow.rootViewController;
+        while (rootVC.presentedViewController) {
+            rootVC = rootVC.presentedViewController;
+        }
+        
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"CAPackage 内部图层"
+                                                                       message:hierarchy
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
+        [rootVC presentViewController:alert animated:YES completion:nil];
+    });
 }
 
 %new
-- (void)cb_logLayers:(CALayer *)layer depth:(int)depth {
-    if (!layer) return;
+- (NSString *)cb_dumpLayers:(CALayer *)layer depth:(int)depth {
+    if (!layer) return @"";
     
+    NSMutableString *result = [NSMutableString string];
     NSMutableString *indent = [NSMutableString string];
-    for (int i = 0; i < depth; i++) {
-        [indent appendString:@"  "];
-    }
+    for (int i = 0; i < depth; i++) [indent appendString:@"  "];
     
-    NSLog(@"[Cowbell] %@Layer: '%@' | bounds: %@", indent, layer.name, NSStringFromCGRect(layer.bounds));
+    NSString *layerName = layer.name ? layer.name : @"<無名>";
+    [result appendFormat:@"%@• %@ (%.0fx%.0f)\n", indent, layerName, layer.bounds.size.width, layer.bounds.size.height];
     
     for (CALayer *sub in layer.sublayers) {
-        [self cb_logLayers:sub depth:depth + 1];
+        [result appendString:[self cb_dumpLayers:sub depth:depth + 1]];
     }
+    return result;
 }
 
 %end
