@@ -1,150 +1,183 @@
 #import <UIKit/UIKit.h>
-#import <objc/runtime.h>
 
-@interface CCUIContentModuleContainerView : UIView
-@property (nonatomic, strong) NSString *moduleIdentifier;
-@property (nonatomic, strong) UILabel *cbPercentLabel;
-@property (nonatomic, assign, getter=isExpanded) BOOL expanded;
-- (void)cb_updatePercentText;
-- (BOOL)cb_isLowPowerModule;
-- (void)cb_handleModuleExpand:(NSNotification *)notification;
-- (void)cb_handleModuleDismiss:(NSNotification *)notification;
+@interface CCUICAPackageView : UIView
+@property (nonatomic, copy) NSString *packageName;
 @end
 
-%hook CCUIContentModuleContainerView
+// 自定义动态电池视图
+@interface CBCustomBatteryView : UIView
+@property (nonatomic, strong) UIView *fillView;
+@property (nonatomic, strong) UILabel *percentLabel;
+- (void)updateBatteryData;
+@end
 
-%property (nonatomic, strong) UILabel *cbPercentLabel;
+@implementation CBCustomBatteryView
 
-- (void)layoutSubviews {
-    %orig;
+- (instancetype)initWithFrame:(CGRect)frame {
+    if (self = [super initWithFrame:frame]) {
+        self.userInteractionEnabled = NO;
+        self.backgroundColor = [UIColor clearColor];
+        
+        // 1. 电量文字（9.5pt Regular）
+        _percentLabel = [[UILabel alloc] init];
+        _percentLabel.font = [UIFont systemFontOfSize:9.5f weight:UIFontWeightRegular];
+        _percentLabel.textColor = [UIColor whiteColor];
+        _percentLabel.textAlignment = NSTextAlignmentCenter;
+        [self addSubview:_percentLabel];
+        
+        // 2. 电池内部填充条
+        _fillView = [[UIView alloc] init];
+        _fillView.backgroundColor = [UIColor whiteColor];
+        _fillView.layer.cornerRadius = 1.0f;
+        _fillView.clipsToBounds = YES;
+        [self addSubview:_fillView];
 
-    // 1. 非低电量模块直接隐藏
-    if (![self cb_isLowPowerModule]) {
-        if (self.cbPercentLabel) {
-            self.cbPercentLabel.hidden = YES;
-        }
-        return;
-    }
-
-    CGFloat width = self.bounds.size.width;
-    CGFloat height = self.bounds.size.height;
-
-    // 2. 尺寸异常或处于展开态，隐藏
-    BOOL isExpanded = NO;
-    if ([self respondsToSelector:@selector(isExpanded)]) {
-        isExpanded = self.isExpanded;
-    }
-
-    if (isExpanded || width > 85.0f || height > 85.0f || width <= 0 || height <= 0) {
-        if (self.cbPercentLabel) {
-            self.cbPercentLabel.hidden = YES;
-        }
-        return;
-    }
-
-    // 3. 正常创建并布局 Label（9.5pt Regular）
-    if (!self.cbPercentLabel) {
-        UILabel *lab = [[UILabel alloc] initWithFrame:CGRectMake(0, height - 20.0f, width, 12.0f)];
-        lab.font = [UIFont systemFontOfSize:9.5f weight:UIFontWeightRegular];
-        lab.textAlignment = NSTextAlignmentCenter;
-        lab.userInteractionEnabled = NO;
-
-        self.cbPercentLabel = lab;
-        [self addSubview:lab];
-
+        // 3. 核心修复：开启系统电量监控并注册通知，实现真正的实时刷新
         [UIDevice currentDevice].batteryMonitoringEnabled = YES;
         
-        // 监听电量与低电量开关状态
         [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(cb_updatePercentText)
+                                                 selector:@selector(updateBatteryData)
                                                      name:UIDeviceBatteryLevelDidChangeNotification
                                                    object:nil];
                                                    
         [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(cb_updatePercentText)
+                                                 selector:@selector(updateBatteryData)
                                                      name:NSProcessInfoPowerStateDidChangeNotification
                                                    object:nil];
-
-        // 核心修复：监听控制中心二级菜单展开/收起系统通知
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(cb_handleModuleExpand:)
-                                                     name:@"CCUIExpandedModuleWillPresentNotification"
-                                                   object:nil];
-
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(cb_handleModuleDismiss:)
-                                                     name:@"CCUIExpandedModuleWillDismissNotification"
-                                                   object:nil];
-    } else {
-        self.cbPercentLabel.hidden = NO;
-        self.cbPercentLabel.frame = CGRectMake(0, height - 20.0f, width, 12.0f);
     }
-
-    [self bringSubviewToFront:self.cbPercentLabel];
-    [self cb_updatePercentText];
+    return self;
 }
 
-%new
-- (void)cb_handleModuleExpand:(NSNotification *)notification {
-    // 只要有任何模块（包括低电量自己或其他模块）展开二级菜单，立刻隐藏百分比
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)updateBatteryData {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.cbPercentLabel) {
-            self.cbPercentLabel.hidden = YES;
+        if (![UIDevice currentDevice].isBatteryMonitoringEnabled) {
+            [UIDevice currentDevice].batteryMonitoringEnabled = YES;
         }
+
+        // 强行重绘与布局，实时更新百分比和线条颜色
+        [self setNeedsLayout];
+        [self setNeedsDisplay];
     });
 }
 
-%new
-- (void)cb_handleModuleDismiss:(NSNotification *)notification {
-    // 二级菜单关闭，恢复显示百分比
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.cbPercentLabel && [self cb_isLowPowerModule]) {
-            self.cbPercentLabel.hidden = NO;
-            [self cb_updatePercentText];
-        }
-    });
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    
+    CGFloat w = self.bounds.size.width;
+    CGFloat h = self.bounds.size.height;
+
+    if (w <= 0 || h <= 0) return;
+
+    // 1. 读取电量
+    float level = [UIDevice currentDevice].batteryLevel;
+    if (level < 0) level = 1.0f;
+    
+    self.percentLabel.text = [NSString stringWithFormat:@"%d%%", (int)round(level * 100)];
+    
+    // 2. 颜色自动反转：低电量模式开启（黄色背景）时切为黑字/黑框，关闭时切为白字/白框
+    BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
+    UIColor *themeColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
+    
+    self.percentLabel.textColor = themeColor;
+    self.fillView.backgroundColor = themeColor;
+
+    // 3. 精准布局
+    self.percentLabel.frame = CGRectMake(0, h - 14.0f, w, 13.0f);
+    
+    CGFloat iconW = 22.0f;
+    CGFloat iconH = 11.0f;
+    CGFloat iconX = (w - iconW) / 2.0f - 0.5f;
+    CGFloat iconY = (h - 14.0f - iconH) / 2.0f - 1.0f;
+    
+    CGFloat padding = 1.5f;
+    CGFloat maxFillW = iconW - (padding * 2) - 1.5f;
+    CGFloat currentFillW = maxFillW * level;
+    if (currentFillW < 1.0f) currentFillW = 1.0f;
+    
+    self.fillView.frame = CGRectMake(iconX + padding, iconY + padding, currentFillW, iconH - (padding * 2));
 }
 
-%new
-- (BOOL)cb_isLowPowerModule {
-    if ([self respondsToSelector:@selector(moduleIdentifier)]) {
-        NSString *modID = [self performSelector:@selector(moduleIdentifier)];
-        if ([modID isEqualToString:@"com.apple.control-center.LowPowerModule"] || 
-            [modID containsString:@"LowPowerModule"]) {
-            return YES;
+- (void)drawRect:(CGRect)rect {
+    [super drawRect:rect];
+    
+    CGFloat w = self.bounds.size.width;
+    CGFloat h = self.bounds.size.height;
+    if (w <= 0 || h <= 0) return;
+
+    CGFloat iconW = 22.0f;
+    CGFloat iconH = 11.0f;
+    CGFloat iconX = (w - iconW) / 2.0f - 0.5f;
+    CGFloat iconY = (h - 14.0f - iconH) / 2.0f - 1.0f;
+
+    BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
+    UIColor *themeColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
+
+    // 绘制电池外框
+    UIBezierPath *bodyPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX, iconY, iconW - 2.0f, iconH) cornerRadius:3.0f];
+    bodyPath.lineWidth = 1.2f;
+    [themeColor setStroke];
+    [bodyPath stroke];
+    
+    // 绘制电池正极 Cap
+    UIBezierPath *capPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX + iconW - 1.5f, iconY + 3.0f, 1.5f, iconH - 6.0f) cornerRadius:0.5f];
+    [themeColor setFill];
+    [capPath fill];
+}
+
+@end
+
+%hook CCUICAPackageView
+
+- (void)layoutSubviews {
+    %orig;
+
+    // 精准识别低电量模块
+    NSString *pkgName = @"";
+    if ([self respondsToSelector:@selector(packageName)]) {
+        pkgName = self.packageName ? self.packageName : @"";
+    }
+
+    BOOL isLowPower = [pkgName containsString:@"LowPower"] || [pkgName containsString:@"Battery"];
+
+    if (!isLowPower) {
+        UIResponder *r = self;
+        while (r) {
+            NSString *cls = NSStringFromClass([r class]);
+            if ([cls containsString:@"Brightness"] || [cls containsString:@"Display"]) return;
+            if ([cls containsString:@"LowPower"]) {
+                isLowPower = YES;
+                break;
+            }
+            r = r.nextResponder;
         }
     }
 
-    UIResponder *responder = self;
-    while (responder) {
-        NSString *clsName = NSStringFromClass([responder class]);
-        if ([clsName containsString:@"CCUILowPowerModeModule"]) {
-            return YES;
+    if (!isLowPower) return;
+
+    // 隐藏原生的矢量图层
+    for (UIView *sub in self.subviews) {
+        if (sub.tag != 9999) {
+            sub.alpha = 0.0f;
         }
-        responder = [responder nextResponder];
     }
 
-    return NO;
-}
+    // 挂载自定义电池视图
+    CBCustomBatteryView *batteryView = [self viewWithTag:9999];
+    if (!batteryView) {
+        batteryView = [[CBCustomBatteryView alloc] initWithFrame:self.bounds];
+        batteryView.tag = 9999;
+        batteryView.backgroundColor = [UIColor clearColor];
+        [self addSubview:batteryView];
+    }
 
-%new
-- (void)cb_updatePercentText {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (!self.cbPercentLabel) return;
-
-        // 1. 获取并刷新电量百分比
-        float level = [UIDevice currentDevice].batteryLevel;
-        int percent = (level >= 0) ? (int)round(level * 100.0f) : 100;
-        self.cbPercentLabel.text = [NSString stringWithFormat:@"%d%%", percent];
-
-        // 2. 文字颜色跟随低电量模式状态反转
-        BOOL isLowPowerMode = [NSProcessInfo processInfo].isLowPowerModeEnabled;
-        if (isLowPowerMode) {
-            self.cbPercentLabel.textColor = [UIColor blackColor];
-        } else {
-            self.cbPercentLabel.textColor = [UIColor whiteColor];
-        }
-    });
+    batteryView.frame = self.bounds;
+    
+    // 刷新数据并强制绘制
+    [batteryView updateBatteryData];
 }
 
 %end
