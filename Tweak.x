@@ -5,39 +5,41 @@
 @property (nonatomic, copy) NSString *packageName;
 @end
 
-// 静态 C 函数：精准只改低电量内部填充
-static void cb_fixBatteryFill(CALayer *layer, float level) {
+// 使用 Mask 遮罩控制宽度，避免修改 anchorPoint 导致的坐标错位和长条动画
+static void cb_applyMaskFill(CALayer *layer, float level) {
     if (!layer || !layer.sublayers) return;
 
     for (CALayer *sub in layer.sublayers) {
         NSString *name = sub.name.lowercaseString;
 
-        // 1. 严格过滤掉外框(body/border)和极耳(cap/tip)
+        // 过滤外框和极耳
         BOOL isBorderOrCap = name && ([name containsString:@"cap"] || [name containsString:@"tip"] || [name containsString:@"border"] || [name containsString:@"body"] || [name containsString:@"outline"]);
 
-        // 2. 只有明确是 fill / capacity / level，或者在低电量 View 内部特定宽度的块才处理
+        // 判定填充图层
         BOOL isFill = name && ([name containsString:@"fill"] || [name containsString:@"capacity"] || [name containsString:@"level"]);
-        if (!isFill && !isBorderOrCap && sub.bounds.size.width >= 12 && sub.bounds.size.width <= 28) {
+        if (!isFill && !isBorderOrCap && sub.bounds.size.width >= 10 && sub.bounds.size.width <= 30 && sub.bounds.size.height >= 5) {
             isFill = YES;
         }
 
         if (isFill && !isBorderOrCap) {
             [CATransaction begin];
-            [CATransaction setDisableActions:YES]; // 禁用过度动画
-            
-            // 修正锚点为左中点 (0, 0.5)，使缩放时左边固定，只改变右侧长度
-            if (sub.anchorPoint.x != 0.0f) {
-                CGRect oldFrame = sub.frame;
-                sub.anchorPoint = CGPointMake(0.0f, 0.5f);
-                sub.frame = oldFrame; // 重新赋值 frame 保持原有相对位置不变
+            [CATransaction setDisableActions:YES]; // 关掉 CoreAnimation 自动过度
+
+            // 如果没有创建过自定义 mask，则添加一个
+            if (!sub.mask) {
+                CALayer *maskLayer = [CALayer layer];
+                maskLayer.backgroundColor = [UIColor blackColor].CGColor;
+                sub.mask = maskLayer;
             }
-            
-            // 按照电量比例横向缩放
-            sub.transform = CATransform3DMakeScale(level, 1.0f, 1.0f);
+
+            // 获取原始尺寸，严格按电量百分比计算遮罩宽度
+            CGRect fullBounds = sub.bounds;
+            sub.mask.frame = CGRectMake(0, 0, fullBounds.size.width * level, fullBounds.size.height);
+
             [CATransaction commit];
         }
 
-        cb_fixBatteryFill(sub, level);
+        cb_applyMaskFill(sub, level);
     }
 }
 
@@ -46,38 +48,54 @@ static void cb_fixBatteryFill(CALayer *layer, float level) {
 - (void)layoutSubviews {
     %orig;
 
-    // 严密防线：判断只有包含低电量包名时才执行修改，防止影响其他图标
-    BOOL isBattery = NO;
-    if ([self respondsToSelector:@selector(packageName)]) {
-        NSString *pkg = self.packageName;
-        if (pkg && ([pkg containsString:@"Battery"] || [pkg containsString:@"LowPower"])) {
-            isBattery = YES;
-        }
-    }
-    
-    // 如果没有 packageName，通过检查 responder 链判断父类控制器
-    if (!isBattery) {
-        UIResponder *r = self;
-        while (r) {
-            NSString *cls = NSStringFromClass([r class]);
-            if ([cls containsString:@"LowPower"] || [cls containsString:@"Battery"]) {
-                isBattery = YES;
-                break;
-            }
-            r = r.nextResponder;
-        }
-    }
-
-    // 不是低电量图标则直接跳过，防止误伤其他控制中心模块
-    if (!isBattery) return;
-
-    // 获取真实电量
+    // 获取真实电量 (范围 0.05 ~ 1.0)
     [UIDevice currentDevice].batteryMonitoringEnabled = YES;
     float level = [UIDevice currentDevice].batteryLevel;
     if (level < 0) level = 1.0f;
     if (level < 0.05f) level = 0.05f;
 
-    cb_fixBatteryFill(self.layer, level);
+    // 判断响应链，保证作用范围只在低电量模块
+    UIResponder *r = self;
+    BOOL isLowPower = NO;
+    while (r) {
+        NSString *cls = NSStringFromClass([r class]);
+        if ([cls containsString:@"LowPower"] || [cls containsString:@"Battery"]) {
+            isLowPower = YES;
+            break;
+        }
+        r = r.nextResponder;
+    }
+
+    if (isLowPower) {
+        cb_applyMaskFill(self.layer, level);
+    }
+}
+
+- (void)setState:(NSString *)state animated:(BOOL)animated {
+    %orig;
+
+    // 当用户点按开关触发切换动画后，再次刷新 Mask 宽度
+    [UIDevice currentDevice].batteryMonitoringEnabled = YES;
+    float level = [UIDevice currentDevice].batteryLevel;
+    if (level < 0) level = 1.0f;
+    if (level < 0.05f) level = 0.05f;
+
+    UIResponder *r = self;
+    BOOL isLowPower = NO;
+    while (r) {
+        NSString *cls = NSStringFromClass([r class]);
+        if ([cls containsString:@"LowPower"] || [cls containsString:@"Battery"]) {
+            isLowPower = YES;
+            break;
+        }
+        r = r.nextResponder;
+    }
+
+    if (isLowPower) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            cb_applyMaskFill(self.layer, level);
+        });
+    }
 }
 
 %end
