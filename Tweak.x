@@ -79,7 +79,7 @@
     self.percentLabel.textColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
     self.fillView.backgroundColor = isLowPower ? yellowColor : [UIColor whiteColor];
 
-    // 1. 尺寸调整：宽度收窄至 34.0f，高度保持 14.0f
+    // 1. 尺寸：宽 34.0f，高 14.0f
     CGFloat iconW = 34.0f;
     CGFloat iconH = 14.0f;
     
@@ -103,4 +103,77 @@
     [super drawRect:rect];
     
     CGFloat w = self.bounds.size.width;
-    CGFloat h = self.
+    CGFloat h = self.bounds.size.height;
+    if (w <= 0 || h <= 0) return;
+
+    CGFloat iconW = 34.0f;
+    CGFloat iconH = 14.0f;
+    CGFloat iconX = (w - iconW) / 2.0f;
+    CGFloat iconY = (h - iconH) / 2.0f + 0.5f;
+
+    BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
+    UIColor *strokeColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
+
+    // 绘制电池主体外框
+    UIBezierPath *bodyPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX, iconY, iconW - 3.0f, iconH) cornerRadius:4.0f];
+    bodyPath.lineWidth = 1.4f;
+    [strokeColor setStroke];
+    [bodyPath stroke];
+    
+    // 绘制电池正极 Cap
+    UIBezierPath *capPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX + iconW - 2.5f, iconY + 3.5f, 2.5f, iconH - 7.0f) cornerRadius:1.0f];
+    [strokeColor setFill];
+    [capPath fill];
+}
+
+@end
+
+%hook CCUICAPackageView
+
+- (void)layoutSubviews {
+    %orig;
+
+    NSString *pkgName = @"";
+    if ([self respondsToSelector:@selector(packageName)]) {
+        pkgName = self.packageName ? self.packageName : @"";
+    }
+
+    BOOL isLowPower = [pkgName containsString:@"LowPower"] || [pkgName containsString:@"Battery"];
+
+    if (!isLowPower) {
+        UIResponder *r = self;
+        while (r) {
+            NSString *cls = NSStringFromClass([r class]);
+            if ([cls containsString:@"Brightness"] || [cls containsString:@"Display"]) return;
+            if ([cls containsString:@"LowPower"]) {
+                isLowPower = YES;
+                break;
+            }
+            r = r.nextResponder;
+        }
+    }
+
+    if (!isLowPower) return;
+
+    // 隐去原生图标
+    for (UIView *subview in self.subviews) {
+        if (subview.tag != 9999) {
+            subview.alpha = 0.0f;
+        }
+    }
+
+    self.backgroundColor = [UIColor clearColor];
+
+    CBCustomBatteryView *batteryView = [self viewWithTag:9999];
+    if (!batteryView) {
+        batteryView = [[CBCustomBatteryView alloc] initWithFrame:self.bounds];
+        batteryView.tag = 9999;
+        [self addSubview:batteryView];
+    }
+
+    batteryView.frame = self.bounds;
+    batteryView.alpha = 1.0f;
+    [batteryView updateBatteryData];
+}
+
+%end
