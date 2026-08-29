@@ -1,6 +1,11 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 
+// 1. 显式声明 CCUICAPackageView 继承自 UIView，并补充自定义方法接口
+@interface CCUICAPackageView : UIView
+- (void)cb_dumpLayer:(CALayer *)layer depth:(int)depth;
+@end
+
 %hook CCUICAPackageView
 
 - (void)layoutSubviews {
@@ -33,7 +38,7 @@
     NSMutableString *indent = [NSMutableString string];
     for (int i = 0; i < depth; i++) [indent appendString:@"  "];
 
-    // 打印 Layer 的类名、Layer Name、Frame 以及 KeyPathPublishedObjects 信息
+    // 打印 Layer 的类名、Layer Name、Frame 以及 KeyPath 信息
     NSLog(@"%@├─ Class: %@ | Name: '%@' | Bounds: %@", 
           indent, 
           NSStringFromClass([layer class]), 
