@@ -1,55 +1,36 @@
 #import <UIKit/UIKit.h>
 
-@interface CCUICAPackageView : UIView
-@property (nonatomic, copy) NSString *packageName;
-@property (nonatomic, strong) UILabel *cb_bottomLabel; // 底层文字（白色）
-@property (nonatomic, strong) UIView *cb_clipContainer;  // 动态裁剪容器
-@property (nonatomic, strong) UILabel *cb_topLabel;    // 顶层文字（黑色，被裁切）
+@interface CCUIRoundButtonViewController : UIViewController
+@property (nonatomic, strong) UILabel *cb_percentLabel;
+@property (nonatomic, strong) UIImageView *cb_batteryIconView;
 - (void)cb_updatePercent;
 @end
 
-%hook CCUICAPackageView
+%hook CCUIRoundButtonViewController
 
-%property (nonatomic, strong) UILabel *cb_bottomLabel;
-%property (nonatomic, strong) UIView *cb_clipContainer;
-%property (nonatomic, strong) UILabel *cb_topLabel;
+%property (nonatomic, strong) UILabel *cb_percentLabel;
+%property (nonatomic, strong) UIImageView *cb_batteryIconView;
 
-- (void)layoutSubviews {
+- (void)viewDidLoad {
     %orig;
 
-    NSString *pkgName = @"";
-    if ([self respondsToSelector:@selector(packageName)]) {
-        pkgName = self.packageName ? self.packageName : @"";
-    }
+    NSString *className = NSStringFromClass([self class]);
+    NSString *title = [self respondsToSelector:@selector(title)] ? [self performSelector:@selector(title)] : @"";
+    BOOL isLowPower = [className containsString:@"LowPower"] || [title containsString:@"低电量"];
 
-    if (![pkgName containsString:@"LowPower"] && ![pkgName containsString:@"Battery"]) {
-        return;
-    }
+    if (isLowPower && !self.cb_percentLabel) {
+        // 1. 创建动态电池 SF Symbol 图标
+        self.cb_batteryIconView = [[UIImageView alloc] init];
+        self.cb_batteryIconView.contentMode = UIViewContentModeScaleAspectFit;
+        [self.view addSubview:self.cb_batteryIconView];
 
-    // 1. 初始化双层 Label 和裁剪容器
-    if (!self.cb_bottomLabel) {
-        // 底层 Label：未被电量覆盖部分显示的颜色（白色）
-        self.cb_bottomLabel = [[UILabel alloc] init];
-        self.cb_bottomLabel.textColor = [UIColor whiteColor];
-        self.cb_bottomLabel.font = [UIFont systemFontOfSize:9.3f weight:UIFontWeightMedium];
-        self.cb_bottomLabel.textAlignment = NSTextAlignmentCenter;
-        [self addSubview:self.cb_bottomLabel];
+        // 2. 创建电量/容量百分比文字
+        self.cb_percentLabel = [[UILabel alloc] init];
+        self.cb_percentLabel.font = [UIFont systemFontOfSize:9.0f weight:UIFontWeightBold];
+        self.cb_percentLabel.textAlignment = NSTextAlignmentCenter;
+        [self.view addSubview:self.cb_percentLabel];
 
-        // 裁剪容器：跟随电量宽度动态伸缩，超出部分直接 Clip
-        self.cb_clipContainer = [[UIView alloc] init];
-        self.cb_clipContainer.clipsToBounds = YES;
-        self.cb_clipContainer.userInteractionEnabled = NO;
-        self.cb_clipContainer.backgroundColor = [UIColor clearColor];
-        [self addSubview:self.cb_clipContainer];
-
-        // 顶层 Label：被电量覆盖部分显示的颜色（深色/黑色）
-        self.cb_topLabel = [[UILabel alloc] init];
-        self.cb_topLabel.textColor = [UIColor colorWithWhite:0.05 alpha:1.0];
-        self.cb_topLabel.font = [UIFont systemFontOfSize:9.3f weight:UIFontWeightMedium];
-        self.cb_topLabel.textAlignment = NSTextAlignmentCenter;
-        [self.cb_clipContainer addSubview:self.cb_topLabel];
-
-        // 监听电量与低电量广播
+        // 监听电量广播
         [UIDevice currentDevice].batteryMonitoringEnabled = YES;
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(cb_updatePercent)
@@ -61,29 +42,30 @@
                                                    object:nil];
         [self cb_updatePercent];
     }
+}
 
-    // 2. 布局与 Clip 范围计算
-    CGFloat w = self.bounds.size.width;
-    CGFloat h = self.bounds.size.height;
-    if (w > 0 && h > 0) {
-        [self.cb_bottomLabel sizeToFit];
-        CGFloat lblW = self.cb_bottomLabel.bounds.size.width;
-        CGFloat lblH = self.cb_bottomLabel.bounds.size.height;
+- (void)viewDidLayoutSubviews {
+    %orig;
 
-        // 文字居中放置在原生图标下方
-        CGRect labelFrame = CGRectMake((w - lblW) / 2.0f, h * 0.68f, lblW, lblH);
-        self.cb_bottomLabel.frame = labelFrame;
+    if (self.cb_percentLabel && self.cb_batteryIconView) {
+        CGFloat w = self.view.bounds.size.width;
+        CGFloat h = self.view.bounds.size.height;
 
-        // 获取当前电量百分比 (0.0 ~ 1.0)
-        float level = [UIDevice currentDevice].batteryLevel;
-        if (level < 0) level = 1.0f;
+        if (w > 0 && h > 0) {
+            BOOL isSelected = [NSProcessInfo processInfo].isLowPowerModeEnabled;
+            UIColor *themeColor = isSelected ? [UIColor colorWithWhite:0.1 alpha:1.0] : [UIColor whiteColor];
 
-        // 计算裁剪容器的宽度（按整体宽度与电量比例计算）
-        CGFloat clipWidth = w * level;
-        self.cb_clipContainer.frame = CGRectMake(0, 0, clipWidth, h);
+            // 布局电池图标（置于上半部分）
+            self.cb_batteryIconView.frame = CGRectMake((w - 24.0f) / 2.0f, h * 0.22f, 24.0f, 14.0f);
+            self.cb_batteryIconView.tintColor = themeColor;
 
-        // 顶层 Label 必须使用与底层 Label 完全一致的 absolute frame，确保字形精准重合
-        self.cb_topLabel.frame = labelFrame;
+            // 布局文字（置于图标下方）
+            [self.cb_percentLabel sizeToFit];
+            CGFloat lblW = self.cb_percentLabel.bounds.size.width;
+            CGFloat lblH = self.cb_percentLabel.bounds.size.height;
+            self.cb_percentLabel.frame = CGRectMake((w - lblW) / 2.0f, h * 0.65f, lblW, lblH);
+            self.cb_percentLabel.textColor = themeColor;
+        }
     }
 }
 
@@ -92,12 +74,29 @@
     dispatch_async(dispatch_get_main_queue(), ^{
         float level = [UIDevice currentDevice].batteryLevel;
         if (level < 0) level = 1.0f;
-        NSString *text = [NSString stringWithFormat:@"%d%%", (int)round(level * 100)];
+        int percent = (int)round(level * 100);
 
-        if (self.cb_bottomLabel && self.cb_topLabel) {
-            self.cb_bottomLabel.text = text;
-            self.cb_topLabel.text = text;
-            [self setNeedsLayout];
+        if (self.cb_batteryIconView && self.cb_percentLabel) {
+            // 根据百分比选择最匹配的原生 SF Symbol 图标名
+            NSString *symbolName = @"battery.100";
+            if (percent <= 10) {
+                symbolName = @"battery.0";
+            } else if (percent <= 35) {
+                symbolName = @"battery.25";
+            } else if (percent <= 65) {
+                symbolName = @"battery.50";
+            } else if (percent <= 85) {
+                symbolName = @"battery.75";
+            }
+
+            UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:14 weight:UIImageSymbolWeightMedium];
+            self.cb_batteryIconView.image = [UIImage systemImageNamed:symbolName withConfiguration:config];
+
+            // 显示电量与容量（以 3200mAh 为例）
+            int mAh = (int)round(level * 3200);
+            self.cb_percentLabel.text = [NSString stringWithFormat:@"%d%% · %dmAh", percent, mAh];
+
+            [self.view setNeedsLayout];
         }
     });
 }
