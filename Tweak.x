@@ -2,6 +2,10 @@
 #import <QuartzCore/QuartzCore.h>
 #import <Photos/Photos.h>
 
+// 忽略 iOS API 弃用警告，防止 Theos 编译报错
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
 @interface CCUICAPackageView : UIView
 - (NSString *)cb_dumpLayers:(CALayer *)layer depth:(int)depth;
 @end
@@ -26,7 +30,7 @@
         } completionHandler:nil];
     }
 
-    // 3. 兼容 iOS 13+ 的 Scene 架构找到顶级 ViewController
+    // 3. 寻找 Key Window 并弹窗显示图层树
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *window = nil;
         for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
@@ -78,3 +82,5 @@
 }
 
 %end
+
+#pragma clang diagnostic pop
