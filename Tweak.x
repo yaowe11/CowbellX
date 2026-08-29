@@ -2,11 +2,10 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
-// 1. 补全 CCUICAPackageView 的接口与自定义方法声明
 @interface CCUICAPackageView : UIView
 @property (nonatomic, copy) NSString *packageName;
 - (id)publishedObjectWithName:(NSString *)name;
-- (void)cb_scaleBatteryFillInLayer:(CALayer *)layer level:(float)level containerWidth:(CGFloat)containerWidth;
+- (void)cb_applyBatteryFillMask:(float)level forLayer:(CALayer *)layer;
 @end
 
 static char kCBIsLowPowerKey;
@@ -50,30 +49,44 @@ static char kCBLastAppliedLevelKey;
     if (fabs(level - lastAppliedLevel) < 0.01f) return;
     objc_setAssociatedObject(self, &kCBLastAppliedLevelKey, @(level), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-    [self cb_scaleBatteryFillInLayer:self.layer level:level containerWidth:self.bounds.size.width];
+    // 精准给内部填充层做 Mask 裁剪，不影响外框和极耳
+    [self cb_applyBatteryFillMask:level forLayer:self.layer];
 }
 
 %new
-- (void)cb_scaleBatteryFillInLayer:(CALayer *)layer level:(float)level containerWidth:(CGFloat)containerWidth {
+- (void)cb_applyBatteryFillMask:(float)level forLayer:(CALayer *)layer {
     if (!layer) return;
 
     for (CALayer *sub in layer.sublayers) {
-        BOOL isLeaf = (sub.sublayers.count == 0);
-        BOOL isNarrowFill = (sub.bounds.size.width > 0 && sub.bounds.size.width < containerWidth * 0.82f);
+        NSString *layerName = sub.name.lowercaseString;
+        
+        // 精准判断：只有名字带 fill / level / body-fill，或者属于内部色块的 ShapeLayer 才是充能条
+        // 避开包含 cap / tip / border / outline / body 的外框和极耳
+        BOOL isFillLayer = (layerName && ([layerName containsString:@"fill"] || [layerName containsString:@"level"])) ||
+                            ([sub isKindOfClass:[CAShapeLayer class]] && sub.bounds.size.width > 10 && sub.bounds.size.width < 30);
+        
+        BOOL isBorderOrCap = layerName && ([layerName containsString:@"cap"] || [layerName containsString:@"tip"] || [layerName containsString:@"border"] || [layerName containsString:@"outline"]);
 
-        if (isLeaf && isNarrowFill) {
+        if (isFillLayer && !isBorderOrCap) {
+            // 给 Fill Layer 单独加 Mask 遮罩
+            CALayer *maskLayer = sub.mask;
+            if (!maskLayer) {
+                maskLayer = [CALayer layer];
+                maskLayer.backgroundColor = [UIColor blackColor].CGColor;
+                sub.mask = maskLayer;
+            }
+
+            // 根据真实电量只裁剪 Fill Layer 的宽度
+            CGRect bounds = sub.bounds;
+            CGRect maskFrame = CGRectMake(0, 0, bounds.size.width * level, bounds.size.height);
+
             [CATransaction begin];
             [CATransaction setDisableActions:NO];
             [CATransaction setAnimationDuration:0.25];
-
-            CATransform3D transform = CATransform3DMakeScale(level, 1.0f, 1.0f);
-            CGFloat xOffset = -(sub.bounds.size.width * (1.0f - level)) / 2.0f;
-            transform = CATransform3DTranslate(transform, xOffset / level, 0, 0);
-
-            sub.transform = transform;
+            maskLayer.frame = maskFrame;
             [CATransaction commit];
         } else {
-            [self cb_scaleBatteryFillInLayer:sub level:level containerWidth:containerWidth];
+            [self cb_applyBatteryFillMask:level forLayer:sub];
         }
     }
 }
