@@ -19,17 +19,17 @@
         
         // 1. 电量填充条
         _fillView = [[UIView alloc] init];
-        _fillView.layer.cornerRadius = 1.8f;
+        _fillView.layer.cornerRadius = 2.0f;
         _fillView.clipsToBounds = YES;
         [self addSubview:_fillView];
 
-        // 2. 百分比文字（9.3pt Regular）
+        // 2. 百分比文字
         _percentLabel = [[UILabel alloc] init];
         _percentLabel.font = [UIFont systemFontOfSize:9.3f weight:UIFontWeightRegular];
         _percentLabel.textAlignment = NSTextAlignmentCenter;
         [self addSubview:_percentLabel];
 
-        // 3. 监听电量与低电量状态
+        // 3. 监听状态
         [UIDevice currentDevice].batteryMonitoringEnabled = YES;
         
         [[NSNotificationCenter defaultCenter] addObserver:self
@@ -78,23 +78,25 @@
     self.percentLabel.textColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
     self.fillView.backgroundColor = isLowPower ? yellowColor : [UIColor whiteColor];
 
-    // 1. 尺寸：宽 34.0f，高 14.0f
-    CGFloat iconW = 34.0f;
+    // 图标整体包含 Cap 的总尺寸
+    CGFloat totalW = 32.0f;
     CGFloat iconH = 14.0f;
-    
-    CGFloat iconX = (w - iconW) / 2.0f;
+    CGFloat iconX = (w - totalW) / 2.0f;
     CGFloat iconY = (h - iconH) / 2.0f - 1.0f; 
 
-    // 2. 内部电量填充条计算
+    // 主体宽度：留出 Cap(1.8f) 和 间隔(1.5f) 的空间
+    CGFloat bodyW = totalW - 1.8f - 1.5f; // 28.7f
+
+    // 内部填充条布局
     CGFloat padding = 2.0f;
-    CGFloat maxFillW = iconW - (padding * 2) - 3.0f;
+    CGFloat maxFillW = bodyW - (padding * 2.0f);
     CGFloat currentFillW = maxFillW * level;
     if (currentFillW < 2.0f) currentFillW = 2.0f;
     
-    self.fillView.frame = CGRectMake(iconX + padding, iconY + padding, currentFillW, iconH - (padding * 2));
-    self.fillView.layer.cornerRadius = 1.8f;
+    self.fillView.frame = CGRectMake(iconX + padding, iconY + padding, currentFillW, iconH - (padding * 2.0f));
+    self.fillView.layer.cornerRadius = 2.0f;
     
-    // 3. 百分比文字定位
+    // 百分比文字定位
     self.percentLabel.frame = CGRectMake(0, iconY + iconH + 5.5f, w, 11.0f);
 }
 
@@ -105,29 +107,31 @@
     CGFloat h = self.bounds.size.height;
     if (w <= 0 || h <= 0) return;
 
-    CGFloat iconW = 34.0f;
+    CGFloat totalW = 32.0f;
     CGFloat iconH = 14.0f;
-    CGFloat iconX = (w - iconW) / 2.0f;
+    CGFloat iconX = (w - totalW) / 2.0f;
     CGFloat iconY = (h - iconH) / 2.0f - 1.0f;
 
     BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
     UIColor *strokeColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
 
-    // 1. 绘制电池主体外框
-    UIBezierPath *bodyPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX, iconY, iconW - 3.0f, iconH) cornerRadius:4.0f];
+    // 1. 绘制电池主体外框 (外框圆角 4.2f，线宽 1.4f)
+    CGFloat bodyW = totalW - 1.8f - 1.5f; // 28.7f
+    UIBezierPath *bodyPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX, iconY, bodyW, iconH) cornerRadius:4.2f];
     bodyPath.lineWidth = 1.4f;
     [strokeColor setStroke];
     [bodyPath stroke];
     
-    // 2. 绘制原生质感的电池正极 Cap（右侧带有半圆弧度的小凸起）
-    CGFloat capW = 2.0f;
-    CGFloat capH = 5.0f;
-    CGFloat capX = iconX + iconW - 3.0f;
+    // 2. 绘制电池正极 Cap（与主体间隔 1.5f，右侧完全圆角弧度，高度 4.8f）
+    CGFloat capW = 1.8f;
+    CGFloat capH = 4.8f;
+    CGFloat capGap = 1.5f; // 原生同款离缝间隔
+    CGFloat capX = iconX + bodyW + capGap;
     CGFloat capY = iconY + (iconH - capH) / 2.0f;
     
     UIBezierPath *capPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(capX, capY, capW, capH)
                                                   byRoundingCorners:(UIRectCornerTopRight | UIRectCornerBottomRight)
-                                                        cornerRadii:CGSizeMake(1.5f, 1.5f)];
+                                                        cornerRadii:CGSizeMake(1.2f, 1.2f)];
     [strokeColor setFill];
     [capPath fill];
 }
