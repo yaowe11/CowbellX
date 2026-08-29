@@ -1,62 +1,70 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 
-// 1. 在 @interface 中显式声明自定义方法
-@interface CCUIToggleViewController : UIViewController
-- (void)cb_applyBatteryLevel:(float)level toView:(UIView *)view;
+@interface CCUICAPackageView : UIView
+@property (nonatomic, copy) NSString *packageName;
+- (id)publishedObjectWithName:(NSString *)name;
 @end
 
-%hook CCUIToggleViewController
+%hook CCUICAPackageView
 
-- (void)viewDidLayoutSubviews {
+- (void)layoutSubviews {
     %orig;
 
-    // 判断当前 View Controller 是否是低电量模块
-    NSString *className = NSStringFromClass([self class]);
-    NSString *desc = self.description;
-    
-    if ([className containsString:@"LowPower"] || [desc containsString:@"LowPower"]) {
+    // 1. 判断是否是低电量模块（通过 Responder 链或 Package 名称）
+    UIResponder *responder = self;
+    BOOL isLowPower = NO;
+    while (responder) {
+        NSString *clsName = NSStringFromClass([responder class]);
+        if ([clsName containsString:@"LowPower"] || [clsName containsString:@"Battery"]) {
+            isLowPower = YES;
+            break;
+        }
+        responder = responder.nextResponder;
+    }
+
+    if (isLowPower) {
+        // 2. 获取手机当前真实电量 (0.0 ~ 1.0)
         [UIDevice currentDevice].batteryMonitoringEnabled = YES;
         float level = [UIDevice currentDevice].batteryLevel;
-        if (level < 0) level = 1.0f; // 模拟器或异常时默认全满
+        if (level < 0) level = 1.0f; // 异常时回退为 1.0
 
-        // 遍历找到内部那个电池图案的 UIImageView
-        [self cb_applyBatteryLevel:level toView:self.view];
+        // 保障最少显示 5% 的微小电量色块，避免完全缩到 0
+        if (level < 0.05f) level = 0.05f;
+
+        // 3. 递归寻找并精准对内部所有的子 ShapeLayer / FillLayer 进行 X 轴按电量比例缩放
+        [self cb_scaleBatteryFillInLayer:self.layer level:level];
     }
 }
 
 %new
-- (void)cb_applyBatteryLevel:(float)level toView:(UIView *)view {
-    if (!view) return;
+- (void)cb_scaleBatteryFillInLayer:(CALayer *)layer level:(float)level {
+    if (!layer) return;
 
-    if ([view isKindOfClass:[UIImageView class]]) {
-        UIImageView *imageView = (UIImageView *)view;
-        // 电池图标的 Frame 尺寸通常在 20~50 之间
-        if (imageView.bounds.size.width > 20 && imageView.bounds.size.width < 50) {
+    // 内部的矢量色块通常是 CAShapeLayer 或带有 fill 属性的 Layer
+    // 电池外框的 Bounds 较宽，而电量填充色块的 Bounds 通常更窄
+    // 通过判断 Layer 属性和层级结构，精准对填充块实施 Transform
+    
+    for (CALayer *sub in layer.sublayers) {
+        // 如果子图层的 Bounds 满足内部填充块的比例，且不是最外层容器
+        if ([sub isKindOfClass:NSClassFromString(@"CAShapeLayer")] || sub.sublayers.count == 0) {
             
-            // 创建一个按真实电量裁剪的 CALayer 作为 Mask
-            CALayer *maskLayer = imageView.layer.mask;
-            if (!maskLayer) {
-                maskLayer = [CALayer layer];
-                maskLayer.backgroundColor = [UIColor blackColor].CGColor;
-                imageView.layer.mask = maskLayer;
+            // 设置锚点为左侧中心 (0, 0.5)，使电量从左向右延伸
+            if (sub.anchorPoint.x != 0.0f) {
+                CGRect oldFrame = sub.frame;
+                sub.anchorPoint = CGPointMake(0.0f, 0.5f);
+                sub.frame = oldFrame;
             }
 
-            // 保持高度不变，宽度按真实电量比例 (level) 进行缩放
-            CGRect bounds = imageView.bounds;
-            CGRect maskFrame = CGRectMake(0, 0, bounds.size.width * level, bounds.size.height);
-
-            // 增加过渡动画，保持与控制中心平滑同步
+            // 施加平滑的电量缩放动画
             [CATransaction begin];
             [CATransaction setAnimationDuration:0.25];
-            maskLayer.frame = maskFrame;
+            sub.transform = CATransform3DMakeScale(level, 1.0f, 1.0f);
             [CATransaction commit];
-            return;
+        } else {
+            // 继续深度遍历子图层
+            [self cb_scaleBatteryFillInLayer:sub level:level];
         }
-    }
-
-    for (UIView *subview in view.subviews) {
-        [self cb_applyBatteryLevel:level toView:subview];
     }
 }
 
