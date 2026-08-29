@@ -84,7 +84,7 @@
     CGFloat iconH = 14.0f;
     
     CGFloat iconX = (w - iconW) / 2.0f;
-    CGFloat iconY = (h - iconH) / 2.0f + 0.5f; 
+    CGFloat iconY = (h - iconH) / 2.0f - 1.0f; 
 
     // 2. 内部电量填充条计算
     CGFloat padding = 2.0f;
@@ -95,8 +95,8 @@
     self.fillView.frame = CGRectMake(iconX + padding, iconY + padding, currentFillW, iconH - (padding * 2));
     self.fillView.layer.cornerRadius = 1.8f;
     
-    // 3. 百分比文字定位
-    self.percentLabel.frame = CGRectMake(0, iconY + iconH + 3.5f, w, 11.0f);
+    // 3. 百分比文字定位（向下微调）
+    self.percentLabel.frame = CGRectMake(0, iconY + iconH + 5.5f, w, 11.0f);
 }
 
 - (void)drawRect:(CGRect)rect {
@@ -109,7 +109,7 @@
     CGFloat iconW = 34.0f;
     CGFloat iconH = 14.0f;
     CGFloat iconX = (w - iconW) / 2.0f;
-    CGFloat iconY = (h - iconH) / 2.0f + 0.5f;
+    CGFloat iconY = (h - iconH) / 2.0f - 1.0f;
 
     BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
     UIColor *strokeColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
