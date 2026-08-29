@@ -4,7 +4,7 @@
 @interface CCUIContentModuleContainerView : UIView
 @property (nonatomic, strong) NSString *moduleIdentifier;
 @property (nonatomic, strong) UILabel *cbPercentLabel;
-@property (nonatomic, assign, getter=isExpanded) BOOL expanded; // 系统自带的展开状态属性
+@property (nonatomic, assign, getter=isExpanded) BOOL expanded;
 - (void)cb_updatePercentText;
 - (BOOL)cb_isLowPowerModule;
 @end
@@ -27,27 +27,31 @@
     CGFloat width = self.bounds.size.width;
     CGFloat height = self.bounds.size.height;
 
-    // 2. 核心修复：如果是二级菜单/展开状态，或者尺寸超过了标准小模块，直接隐藏百分比
+    // 2. 检查自身及父视图透明度（展开二级菜单时，后台模块 alpha 会变成 0 或接近 0）
+    BOOL isAncestorHidden = NO;
+    UIView *curr = self;
+    while (curr) {
+        if (curr.hidden || curr.alpha < 0.1f) {
+            isAncestorHidden = YES;
+            break;
+        }
+        curr = curr.superview;
+    }
+
     BOOL isExpanded = NO;
     if ([self respondsToSelector:@selector(isExpanded)]) {
         isExpanded = self.isExpanded;
     }
 
-    if (isExpanded || width > 85.0f || height > 85.0f || width <= 0 || height <= 0) {
+    // 3. 核心修复：一旦自身/父视图被淡出隐藏、或者处于展开态/尺寸异常，彻底隐藏 Label
+    if (isAncestorHidden || isExpanded || width > 85.0f || height > 85.0f || width <= 0 || height <= 0) {
         if (self.cbPercentLabel) {
             self.cbPercentLabel.hidden = YES;
         }
         return;
     }
 
-    // 3. 电池图标保持原生位置
-    for (UIView *subview in self.subviews) {
-        if (subview != self.cbPercentLabel) {
-            subview.transform = CGAffineTransformIdentity;
-        }
-    }
-
-    // 4. 正常小模块形态下显示并布局 Label（9.5pt Regular，Y轴 height - 20）
+    // 4. 正常状态：保持 Label 显示与同步
     if (!self.cbPercentLabel) {
         UILabel *lab = [[UILabel alloc] initWithFrame:CGRectMake(0, height - 20.0f, width, 12.0f)];
         lab.font = [UIFont systemFontOfSize:9.5f weight:UIFontWeightRegular];
@@ -105,12 +109,12 @@
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!self.cbPercentLabel) return;
 
-        // 1. 获取并刷新电量百分比
+        // 获取并刷新电量百分比
         float level = [UIDevice currentDevice].batteryLevel;
         int percent = (level >= 0) ? (int)round(level * 100.0f) : 100;
         self.cbPercentLabel.text = [NSString stringWithFormat:@"%d%%", percent];
 
-        // 2. 文字颜色跟随低电量模式状态反转
+        // 文字颜色跟随低电量模式状态反转
         BOOL isLowPowerMode = [NSProcessInfo processInfo].isLowPowerModeEnabled;
         if (isLowPowerMode) {
             self.cbPercentLabel.textColor = [UIColor blackColor];
