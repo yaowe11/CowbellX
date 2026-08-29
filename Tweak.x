@@ -4,81 +4,85 @@
 @property (nonatomic, copy) NSString *packageName;
 @end
 
-// 自定义动态电池视图：独立于 CAStatePackage，原生可靠
-@interface CBCustomBatteryView : UIView
-@property (nonatomic, assign) float batteryLevel;
-@property (nonatomic, strong) UIView *fillView;
+// Cowbell 核心自定义电池控件
+@interface CBCowbellView : UIView
+@property (nonatomic, strong) UIView *fillBar;
 @property (nonatomic, strong) UILabel *percentLabel;
 @end
 
-@implementation CBCustomBatteryView
+@implementation CBCowbellView
 
 - (instancetype)initWithFrame:(CGRect)frame {
     if (self = [super initWithFrame:frame]) {
         self.userInteractionEnabled = NO;
-        
-        // 1. 电量文字
+        self.backgroundColor = [UIColor clearColor];
+
+        // 1. 内部动态电量填充条
+        _fillBar = [[UIView alloc] init];
+        _fillBar.layer.cornerRadius = 1.0f;
+        _fillBar.clipsToBounds = YES;
+        [self addSubview:_fillBar];
+
+        // 2. 底部百分比数字
         _percentLabel = [[UILabel alloc] init];
-        _percentLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+        _percentLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightMedium];
         _percentLabel.textColor = [UIColor whiteColor];
         _percentLabel.textAlignment = NSTextAlignmentCenter;
         [self addSubview:_percentLabel];
-        
-        // 2. 电池内部填充条（完全自定义 View，按百分比精准拉伸）
-        _fillView = [[UIView alloc] init];
-        _fillView.backgroundColor = [UIColor whiteColor];
-        _fillView.layer.cornerRadius = 1.5f;
-        _fillView.clipsToBounds = YES;
-        [self addSubview:_fillView];
     }
     return self;
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    
-    // 布局文字
-    _percentLabel.frame = CGRectMake(0, self.bounds.size.height - 14, self.bounds.size.width, 13);
-    
-    // 读取电量
+
+    // 获取真实电量 (0.0 ~ 1.0)
     [UIDevice currentDevice].batteryMonitoringEnabled = YES;
     float level = [UIDevice currentDevice].batteryLevel;
-    if (level < 0) level = 1.0f;
-    
+    if (level < 0.0f) level = 1.0f;
+
+    // 获取当前是否开启了低电量模式
+    BOOL isLowPowerMode = [[NSProcessInfo processInfo] isLowPowerModeEnabled];
+
+    // 设置百分比文字
     _percentLabel.text = [NSString stringWithFormat:@"%d%%", (int)(level * 100)];
-    
-    // 电池框固定尺寸与位置 (根据 60% 截图比例精准对齐)
-    CGFloat iconW = 22.0f;
-    CGFloat iconH = 11.0f;
+    _percentLabel.frame = CGRectMake(0, self.bounds.size.height - 15.0f, self.bounds.size.width, 14.0f);
+
+    // 电池外框尺寸（精准对齐控制中心 Icon）
+    CGFloat iconW = 21.0f;
+    CGFloat iconH = 10.5f;
     CGFloat iconX = (self.bounds.size.width - iconW) / 2.0f - 1.0f;
-    CGFloat iconY = (self.bounds.size.height - 14 - iconH) / 2.0f - 1.0f;
-    
-    // 内部填充区域 (Padding)
+    CGFloat iconY = (self.bounds.size.height - 15.0f - iconH) / 2.0f - 1.0f;
+
+    // 填充条根据电量计算宽度
     CGFloat padding = 1.5f;
-    CGFloat maxFillW = iconW - (padding * 2) - 1.5f; // 扣除正极极耳
+    CGFloat maxFillW = iconW - (padding * 2) - 1.5f; // 扣除右侧极耳
     CGFloat currentFillW = maxFillW * level;
     if (currentFillW < 1.0f) currentFillW = 1.0f;
-    
-    _fillView.frame = CGRectMake(iconX + padding, iconY + padding, currentFillW, iconH - (padding * 2));
+
+    _fillBar.frame = CGRectMake(iconX + padding, iconY + padding, currentFillW, iconH - (padding * 2));
+
+    // 状态颜色：开启低电量模式时为黄色，正常为白色
+    _fillBar.backgroundColor = isLowPowerMode ? [UIColor systemYellowColor] : [UIColor whiteColor];
 }
 
-// 在自定义视图上直接绘制高精度的电池外框与极耳
+// 绘制原生标准的电池外框与右侧极耳
 - (void)drawRect:(CGRect)rect {
     [super drawRect:rect];
-    
-    CGFloat iconW = 22.0f;
-    CGFloat iconH = 11.0f;
+
+    CGFloat iconW = 21.0f;
+    CGFloat iconH = 10.5f;
     CGFloat iconX = (self.bounds.size.width - iconW) / 2.0f - 1.0f;
-    CGFloat iconY = (self.bounds.size.height - 14 - iconH) / 2.0f - 1.0f;
-    
-    // 绘制电池主外框
+    CGFloat iconY = (self.bounds.size.height - 15.0f - iconH) / 2.0f - 1.0f;
+
+    // 绘制电池主体外框
     UIBezierPath *bodyPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX, iconY, iconW - 2.0f, iconH) cornerRadius:3.0f];
-    bodyPath.lineWidth = 1.2f;
+    bodyPath.lineWidth = 1.1f;
     [[UIColor whiteColor] setStroke];
     [bodyPath stroke];
-    
-    // 绘制电池右侧正极 Cap
-    UIBezierPath *capPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX + iconW - 1.5f, iconY + 3.0f, 1.5f, iconH - 6.0f) cornerRadius:0.5f];
+
+    // 绘制右侧极耳 (Cap)
+    UIBezierPath *capPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX + iconW - 1.5f, iconY + 3.0f, 1.2f, iconH - 6.0f) cornerRadius:0.5f];
     [[UIColor whiteColor] setFill];
     [capPath fill];
 }
@@ -90,7 +94,7 @@
 - (void)layoutSubviews {
     %orig;
 
-    // 精准识别低电量模块
+    // 1. 响应链精准判断是否为低电量模块
     NSString *pkgName = @"";
     if ([self respondsToSelector:@selector(packageName)]) {
         pkgName = self.packageName ? self.packageName : @"";
@@ -113,25 +117,24 @@
 
     if (!isLowPower) return;
 
-    // 关键操作：隐藏原本不听话的矢量 CAStatePackage 图层
+    // 2. 将原本复杂的系统矢量图标设为全透明隐藏
     for (UIView *sub in self.subviews) {
-        if (sub.tag != 9999) {
-            sub.alpha = 0.0f; // 彻底隐去原生图标
+        if (sub.tag != 6666) {
+            sub.alpha = 0.0f;
         }
     }
 
-    // 挂载我们自定义的完美电池视图
-    CBCustomBatteryView *batteryView = [self viewWithTag:9999];
-    if (!batteryView) {
-        batteryView = [[CBCustomBatteryView alloc] initWithFrame:self.bounds];
-        batteryView.tag = 9999;
-        batteryView.backgroundColor = [UIColor clearColor];
-        [self addSubview:batteryView];
+    // 3. 挂载 Cowbell 效果视图
+    CBCowbellView *cowbell = [self viewWithTag:6666];
+    if (!cowbell) {
+        cowbell = [[CBCowbellView alloc] initWithFrame:self.bounds];
+        cowbell.tag = 6666;
+        [self addSubview:cowbell];
     }
 
-    batteryView.frame = self.bounds;
-    [batteryView setNeedsDisplay];
-    [batteryView setNeedsLayout];
+    cowbell.frame = self.bounds;
+    [cowbell setNeedsDisplay];
+    [cowbell setNeedsLayout];
 }
 
 %end
