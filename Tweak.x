@@ -1,7 +1,9 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 
+// 1. 在 @interface 中显式声明自定义方法
 @interface CCUIToggleViewController : UIViewController
+- (void)cb_applyBatteryLevel:(float)level toView:(UIView *)view;
 @end
 
 %hook CCUIToggleViewController
@@ -29,7 +31,7 @@
 
     if ([view isKindOfClass:[UIImageView class]]) {
         UIImageView *imageView = (UIImageView *)view;
-        // 电池图标的 Frame 尺寸通常在 30~36 左右
+        // 电池图标的 Frame 尺寸通常在 20~50 之间
         if (imageView.bounds.size.width > 20 && imageView.bounds.size.width < 50) {
             
             // 创建一个按真实电量裁剪的 CALayer 作为 Mask
@@ -44,7 +46,7 @@
             CGRect bounds = imageView.bounds;
             CGRect maskFrame = CGRectMake(0, 0, bounds.size.width * level, bounds.size.height);
 
-            // 如果处于开关切换瞬间，增加平滑过度动画，跟原生动画保持同步
+            // 增加过渡动画，保持与控制中心平滑同步
             [CATransaction begin];
             [CATransaction setAnimationDuration:0.25];
             maskLayer.frame = maskFrame;
