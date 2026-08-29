@@ -1,28 +1,22 @@
 #import <UIKit/UIKit.h>
-#import <QuartzCore/QuartzCore.h>
-
-extern NSString* const kCAFilterDestOut;
-
-@interface CALayer (Private)
-@property (nonatomic, retain) NSString *compositingFilter;
-@property (nonatomic, assign) BOOL allowsGroupBlending;
-@property (nonatomic, assign) BOOL allowsGroupOpacity;
-@end
 
 @interface CCUICAPackageView : UIView
 @property (nonatomic, copy) NSString *packageName;
-@property (nonatomic, strong) UILabel *cb_percentLabel;
-- (void)cb_updatePercent; // <-- 补全这行声明，解决编译报错
+@property (nonatomic, strong) UILabel *cb_bottomLabel; // 底层文字（白色）
+@property (nonatomic, strong) UIView *cb_clipContainer;  // 动态裁剪容器
+@property (nonatomic, strong) UILabel *cb_topLabel;    // 顶层文字（黑色，被裁切）
+- (void)cb_updatePercent;
 @end
 
 %hook CCUICAPackageView
 
-%property (nonatomic, strong) UILabel *cb_percentLabel;
+%property (nonatomic, strong) UILabel *cb_bottomLabel;
+%property (nonatomic, strong) UIView *cb_clipContainer;
+%property (nonatomic, strong) UILabel *cb_topLabel;
 
 - (void)layoutSubviews {
     %orig;
 
-    // 1. 精准判断：只处理低电量模块的 CAPackage
     NSString *pkgName = @"";
     if ([self respondsToSelector:@selector(packageName)]) {
         pkgName = self.packageName ? self.packageName : @"";
@@ -32,21 +26,30 @@ extern NSString* const kCAFilterDestOut;
         return;
     }
 
-    // 2. 初始化镂空 Label
-    if (!self.cb_percentLabel) {
-        UILabel *label = [[UILabel alloc] init];
-        label.textColor = [UIColor whiteColor];
-        label.font = [UIFont systemFontOfSize:9.5f weight:UIFontWeightMedium];
-        label.textAlignment = NSTextAlignmentCenter;
-        
-        // 关键点：隔离 Blend Mode，防止 DestOut 滤镜污染控制中心其他组件（如亮度/音量条）
-        self.layer.allowsGroupBlending = NO;
-        label.layer.allowsGroupOpacity = YES;
+    // 1. 初始化双层 Label 和裁剪容器
+    if (!self.cb_bottomLabel) {
+        // 底层 Label：未被电量覆盖部分显示的颜色（白色）
+        self.cb_bottomLabel = [[UILabel alloc] init];
+        self.cb_bottomLabel.textColor = [UIColor whiteColor];
+        self.cb_bottomLabel.font = [UIFont systemFontOfSize:9.3f weight:UIFontWeightMedium];
+        self.cb_bottomLabel.textAlignment = NSTextAlignmentCenter;
+        [self addSubview:self.cb_bottomLabel];
 
-        self.cb_percentLabel = label;
-        [self addSubview:self.cb_percentLabel];
+        // 裁剪容器：跟随电量宽度动态伸缩，超出部分直接 Clip
+        self.cb_clipContainer = [[UIView alloc] init];
+        self.cb_clipContainer.clipsToBounds = YES;
+        self.cb_clipContainer.userInteractionEnabled = NO;
+        self.cb_clipContainer.backgroundColor = [UIColor clearColor];
+        [self addSubview:self.cb_clipContainer];
 
-        // 监听系统电量与低电量状态广播
+        // 顶层 Label：被电量覆盖部分显示的颜色（深色/黑色）
+        self.cb_topLabel = [[UILabel alloc] init];
+        self.cb_topLabel.textColor = [UIColor colorWithWhite:0.05 alpha:1.0];
+        self.cb_topLabel.font = [UIFont systemFontOfSize:9.3f weight:UIFontWeightMedium];
+        self.cb_topLabel.textAlignment = NSTextAlignmentCenter;
+        [self.cb_clipContainer addSubview:self.cb_topLabel];
+
+        // 监听电量与低电量广播
         [UIDevice currentDevice].batteryMonitoringEnabled = YES;
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(cb_updatePercent)
@@ -59,26 +62,28 @@ extern NSString* const kCAFilterDestOut;
         [self cb_updatePercent];
     }
 
-    // 3. 实时调整位置与滤镜
+    // 2. 布局与 Clip 范围计算
     CGFloat w = self.bounds.size.width;
     CGFloat h = self.bounds.size.height;
     if (w > 0 && h > 0) {
-        [self.cb_percentLabel sizeToFit];
-        CGFloat lblW = self.cb_percentLabel.bounds.size.width;
-        CGFloat lblH = self.cb_percentLabel.bounds.size.height;
-        
-        // 置于原生电池图标正下方
-        self.cb_percentLabel.frame = CGRectMake((w - lblW) / 2.0f, h * 0.68f, lblW, lblH);
+        [self.cb_bottomLabel sizeToFit];
+        CGFloat lblW = self.cb_bottomLabel.bounds.size.width;
+        CGFloat lblH = self.cb_bottomLabel.bounds.size.height;
 
-        // 切换低电量状态时的滤镜响应
-        BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
-        if (isLowPower) {
-            // 黄色背景高亮时：直接挖空文字区域，露出底层颜色
-            self.cb_percentLabel.layer.compositingFilter = kCAFilterDestOut;
-        } else {
-            // 未激活时：清除滤镜，正常显示白色文字
-            self.cb_percentLabel.layer.compositingFilter = nil;
-        }
+        // 文字居中放置在原生图标下方
+        CGRect labelFrame = CGRectMake((w - lblW) / 2.0f, h * 0.68f, lblW, lblH);
+        self.cb_bottomLabel.frame = labelFrame;
+
+        // 获取当前电量百分比 (0.0 ~ 1.0)
+        float level = [UIDevice currentDevice].batteryLevel;
+        if (level < 0) level = 1.0f;
+
+        // 计算裁剪容器的宽度（按整体宽度与电量比例计算）
+        CGFloat clipWidth = w * level;
+        self.cb_clipContainer.frame = CGRectMake(0, 0, clipWidth, h);
+
+        // 顶层 Label 必须使用与底层 Label 完全一致的 absolute frame，确保字形精准重合
+        self.cb_topLabel.frame = labelFrame;
     }
 }
 
@@ -87,9 +92,11 @@ extern NSString* const kCAFilterDestOut;
     dispatch_async(dispatch_get_main_queue(), ^{
         float level = [UIDevice currentDevice].batteryLevel;
         if (level < 0) level = 1.0f;
-        
-        if (self.cb_percentLabel) {
-            self.cb_percentLabel.text = [NSString stringWithFormat:@"%d%%", (int)round(level * 100)];
+        NSString *text = [NSString stringWithFormat:@"%d%%", (int)round(level * 100)];
+
+        if (self.cb_bottomLabel && self.cb_topLabel) {
+            self.cb_bottomLabel.text = text;
+            self.cb_topLabel.text = text;
             [self setNeedsLayout];
         }
     });
