@@ -2,114 +2,164 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
-#pragma mark - Hook CCUICAPackageView (核心逻辑)
-
-@interface CCUICAPackageView : UIView
+@interface CCUIContentModuleContainerView : UIView
+@property (nonatomic, strong) NSString *moduleIdentifier;
 @property (nonatomic, strong) UILabel *cbPercentLabel;
+- (void)cb_updatePercentText;
 - (BOOL)cb_isLowPowerModule;
-- (void)cb_updateBatteryState;
+- (void)cb_updateNativeIconFillWithLevel:(float)level inView:(UIView *)parentView;
 @end
 
-%hook CCUICAPackageView
+%hook CCUIContentModuleContainerView
 
 %property (nonatomic, strong) UILabel *cbPercentLabel;
-
-- (void)didMoveToWindow {
-    %orig;
-    if (self.window && [self cb_isLowPowerModule]) {
-        [UIDevice currentDevice].batteryMonitoringEnabled = YES;
-        
-        // 监听电量与低电量模式变化
-        [[NSNotificationCenter defaultCenter] removeObserver:self name:UIDeviceBatteryLevelDidChangeNotification object:nil];
-        [[NSNotificationCenter defaultCenter] removeObserver:self name:NSProcessInfoPowerStateDidChangeNotification object:nil];
-        
-        [[NSNotificationCenter defaultCenter] addObserver:self 
-                                                 selector:@selector(cb_updateBatteryState) 
-                                                     name:UIDeviceBatteryLevelDidChangeNotification 
-                                                   object:nil];
-        [[NSNotificationCenter defaultCenter] addObserver:self 
-                                                 selector:@selector(cb_updateBatteryState) 
-                                                     name:NSProcessInfoPowerStateDidChangeNotification 
-                                                   object:nil];
-    } else {
-        [[NSNotificationCenter defaultCenter] removeObserver:self];
-    }
-}
 
 - (void)layoutSubviews {
     %orig;
 
-    if (![self cb_isLowPowerModule]) return;
-
-    CGFloat w = self.bounds.size.width;
-    CGFloat h = self.bounds.size.height;
-    if (w <= 0 || h <= 0) return;
-
-    // 1. 确保百分比 Label 存在并处于完美位置
-    if (!self.cbPercentLabel) {
-        UILabel *lab = [[UILabel alloc] init];
-        // 使用与控制中心完全一致的系统 Medium 字体
-        lab.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightMedium];
-        lab.textAlignment = NSTextAlignmentCenter;
-        lab.userInteractionEnabled = NO;
-        self.cbPercentLabel = lab;
-        [self addSubview:lab];
+    // 1. 非低电量模块直接隐藏并返回
+    if (![self cb_isLowPowerModule]) {
+        if (self.cbPercentLabel) {
+            self.cbPercentLabel.hidden = YES;
+        }
+        return;
     }
 
-    // 2. 布局调整：把 PackageView 调整回原始中心，Label 放在下方
-    // 计算百分比 Label 位置 (居中，距底部保留合适间距)
-    CGFloat labelH = 14.0f;
-    self.cbPercentLabel.frame = CGRectMake(0, h - labelH - 2.0f, w, labelH);
-    [self bringSubviewToFront:self.cbPercentLabel];
+    CGFloat width = self.bounds.size.width;
+    CGFloat height = self.bounds.size.height;
 
-    // 3. 刷新电量数据与颜色
-    [self cb_updateBatteryState];
+    if (width <= 0 || height <= 0 || width > 100 || height > 100) return;
+
+    // 2. 电池图标完全保持原生位置，不动它
+    for (UIView *subview in self.subviews) {
+        if (subview != self.cbPercentLabel) {
+            subview.transform = CGAffineTransformIdentity;
+        }
+    }
+
+    // 3. 保持你调好的百分比 Label 位置（Y轴 height - 22，字体大小 10 Bold）
+    if (!self.cbPercentLabel) {
+        UILabel *lab = [[UILabel alloc] initWithFrame:CGRectMake(0, height - 22, width, 12)];
+        lab.font = [UIFont systemFontOfSize:10 weight:UIFontWeightBold];
+        lab.textAlignment = NSTextAlignmentCenter;
+        lab.userInteractionEnabled = NO;
+
+        self.cbPercentLabel = lab;
+        [self addSubview:lab];
+
+        [UIDevice currentDevice].batteryMonitoringEnabled = YES;
+
+        // 监听电量与低电量开关状态
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(cb_updatePercentText)
+                                                     name:UIDeviceBatteryLevelDidChangeNotification
+                                                   object:nil];
+
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(cb_updatePercentText)
+                                                     name:NSProcessInfoPowerStateDidChangeNotification
+                                                   object:nil];
+    } else {
+        self.cbPercentLabel.hidden = NO;
+        self.cbPercentLabel.frame = CGRectMake(0, height - 22, width, 12);
+    }
+
+    [self bringSubviewToFront:self.cbPercentLabel];
+    [self cb_updatePercentText];
 }
 
 %new
 - (BOOL)cb_isLowPowerModule {
+    if ([self respondsToSelector:@selector(moduleIdentifier)]) {
+        NSString *modID = [self performSelector:@selector(moduleIdentifier)];
+        if ([modID isEqualToString:@"com.apple.control-center.LowPowerModule"] ||
+            [modID containsString:@"LowPowerModule"]) {
+            return YES;
+        }
+    }
+
     UIResponder *responder = self;
     while (responder) {
         NSString *clsName = NSStringFromClass([responder class]);
-        if ([clsName containsString:@"LowPower"]) {
+        if ([clsName containsString:@"CCUILowPowerModeModule"]) {
             return YES;
         }
         responder = responder.nextResponder;
     }
+
     return NO;
 }
 
 %new
-- (void)cb_updateBatteryState {
-    __weak typeof(self) weakSelf = self;
+- (void)cb_updatePercentText {
     dispatch_async(dispatch_get_main_queue(), ^{
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) return;
-
+        // 1. 获取电量数值 (0.0 ~ 1.0)
         float level = [UIDevice currentDevice].batteryLevel;
-        if (level < 0) level = 1.0f;
-        BOOL isLowPowerMode = [NSProcessInfo processInfo].isLowPowerModeEnabled;
+        if (level < 0) level = 1.0f; // 防护：未开启或读取失败时按100%算
 
-        // A. 注入 CAPackage 内部电量填充
-        @try {
-            [strongSelf.layer setValue:@(level) forKeyPath:@"publishedObjects.fill.strokeEnd"];
-        } @catch (NSException *e) {}
-
-        // B. 刷新百分比数字与文字颜色
-        if (strongSelf.cbPercentLabel) {
+        // 2. 刷新百分比文字与颜色（保持你原有的文字逻辑）
+        if (self.cbPercentLabel) {
             int percent = (int)round(level * 100.0f);
-            strongSelf.cbPercentLabel.text = [NSString stringWithFormat:@"%d%%", percent];
-            
-            // 开启低电量模式时为黑色，未开启时为白色
-            UIColor *textColor = isLowPowerMode ? [UIColor blackColor] : [UIColor whiteColor];
-            strongSelf.cbPercentLabel.textColor = textColor;
+            self.cbPercentLabel.text = [NSString stringWithFormat:@"%d%%", percent];
+
+            BOOL isLowPowerMode = [NSProcessInfo processInfo].isLowPowerModeEnabled;
+            if (isLowPowerMode) {
+                self.cbPercentLabel.textColor = [UIColor blackColor];
+            } else {
+                self.cbPercentLabel.textColor = [UIColor whiteColor];
+            }
         }
+
+        // 3. 让原生的 CA 矢量电池图标按百分比实时填充
+        [self cb_updateNativeIconFillWithLevel:level inView:self];
     });
 }
 
-- (void)dealloc {
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-    %orig;
+%new
+- (void)cb_updateNativeIconFillWithLevel:(float)level inView:(UIView *)parentView {
+    if (!parentView) return;
+
+    // 先尝试通过 CAPackage 系统的 KeyPath 直接注入
+    @try {
+        [parentView.layer setValue:@(level) forKeyPath:@"publishedObjects.fill.strokeEnd"];
+    } @catch (NSException *e) {}
+
+    // 递归遍历该 View 下的所有 CALayer，精确定位到电池内部的 Fill 图层
+    NSMutableArray *layersToVisit = [NSMutableArray arrayWithObject:parentView.layer];
+    while (layersToVisit.count > 0) {
+        CALayer *currentLayer = [layersToVisit firstObject];
+        [layersToVisit removeObjectAtIndex:0];
+
+        NSString *layerName = currentLayer.name.lowercaseString;
+        
+        // 系统原生低电量 CAPackage 中，内部填充图层的 Name 通常包含 "fill" 或 "level"
+        if (layerName && ([layerName containsString:@"fill"] || [layerName containsString:@"level"]) && ![layerName containsString:@"body"] && ![layerName containsString:@"border"]) {
+            
+            // 如果是 CAShapeLayer
+            if ([currentLayer isKindOfClass:[CAShapeLayer class]]) {
+                ((CAShapeLayer *)currentLayer).strokeEnd = level;
+            } else {
+                // 如果是普通 CALayer，调整锚点为左中，进行 X 轴百分比缩放
+                if (currentLayer.anchorPoint.x != 0) {
+                    CGRect oldFrame = currentLayer.frame;
+                    currentLayer.anchorPoint = CGPointMake(0, 0.5);
+                    currentLayer.frame = oldFrame;
+                }
+                currentLayer.transform = CATransform3DMakeScale(level, 1.0, 1.0);
+            }
+        }
+
+        if (currentLayer.sublayers.count > 0) {
+            [layersToVisit addObjectsFromArray:currentLayer.sublayers];
+        }
+    }
+
+    // 递归查找子视图（防层级嵌套）
+    for (UIView *subview in parentView.subviews) {
+        if (subview != self.cbPercentLabel) {
+            [self cb_updateNativeIconFillWithLevel:level inView:subview];
+        }
+    }
 }
 
 %end
