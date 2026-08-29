@@ -19,7 +19,7 @@
         
         // 1. 电量填充条
         _fillView = [[UIView alloc] init];
-        _fillView.layer.cornerRadius = 1.8f;
+        _fillView.layer.cornerRadius = 1.5f;
         _fillView.clipsToBounds = YES;
         [self addSubview:_fillView];
 
@@ -75,25 +75,25 @@
     BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
     UIColor *yellowColor = [UIColor colorWithRed:255/255.0 green:204/255.0 blue:0/255.0 alpha:1.0];
     
-    // 低电量配色分配：容量变黄，数字和%变黑；未开启时全白
+    // 低电量配色：容量变黄，数字和%变黑；未开启时全白
     self.percentLabel.textColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
     self.fillView.backgroundColor = isLowPower ? yellowColor : [UIColor whiteColor];
 
-    // 1. 电池瘦身尺寸（宽38.0，高15.0）
+    // 1. 电池尺寸调整：长度保持 38.0，高度再收窄一点至 13.5
     CGFloat iconW = 38.0f;
-    CGFloat iconH = 15.0f;
+    CGFloat iconH = 13.5f;
     
     CGFloat iconX = (w - iconW) / 2.0f;
     CGFloat iconY = (h - iconH) / 2.0f + 1.0f; 
 
     // 2. 内部电量填充条计算
-    CGFloat padding = 2.2f;
+    CGFloat padding = 2.0f;
     CGFloat maxFillW = iconW - (padding * 2) - 3.0f;
     CGFloat currentFillW = maxFillW * level;
     if (currentFillW < 2.0f) currentFillW = 2.0f;
     
     self.fillView.frame = CGRectMake(iconX + padding, iconY + padding, currentFillW, iconH - (padding * 2));
-    self.fillView.layer.cornerRadius = 1.8f;
+    self.fillView.layer.cornerRadius = 1.5f;
     
     // 3. 百分比文字位置
     self.percentLabel.frame = CGRectMake(0, iconY + iconH + 4.5f, w, 11.0f);
@@ -107,7 +107,7 @@
     if (w <= 0 || h <= 0) return;
 
     CGFloat iconW = 38.0f;
-    CGFloat iconH = 15.0f;
+    CGFloat iconH = 13.5f;
     CGFloat iconX = (w - iconW) / 2.0f;
     CGFloat iconY = (h - iconH) / 2.0f + 1.0f;
 
@@ -115,14 +115,14 @@
     BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
     UIColor *strokeColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
 
-    // 绘制电池主体外框 (高15.0f 更加纤细)
-    UIBezierPath *bodyPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX, iconY, iconW - 3.0f, iconH) cornerRadius:4.5f];
-    bodyPath.lineWidth = 1.8f;
+    // 绘制电池主体外框 (高13.5f，圆角与线宽按比例收窄)
+    UIBezierPath *bodyPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX, iconY, iconW - 3.0f, iconH) cornerRadius:4.0f];
+    bodyPath.lineWidth = 1.6f;
     [strokeColor setStroke];
     [bodyPath stroke];
     
     // 绘制电池正极 Cap
-    UIBezierPath *capPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX + iconW - 2.5f, iconY + 4.0f, 2.5f, iconH - 8.0f) cornerRadius:1.0f];
+    UIBezierPath *capPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX + iconW - 2.5f, iconY + 3.5f, 2.5f, iconH - 7.0f) cornerRadius:1.0f];
     [strokeColor setFill];
     [capPath fill];
 }
