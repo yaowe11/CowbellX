@@ -1,52 +1,60 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 
-// 1. 显式声明 CCUICAPackageView 继承自 UIView，并补充自定义方法接口
-@interface CCUICAPackageView : UIView
-- (void)cb_dumpLayer:(CALayer *)layer depth:(int)depth;
+@interface CCUIToggleViewController : UIViewController
 @end
 
-%hook CCUICAPackageView
+%hook CCUIToggleViewController
 
-- (void)layoutSubviews {
+- (void)viewDidLayoutSubviews {
     %orig;
 
-    // 判断是不是低电量模块里的 PackageView
-    UIResponder *responder = self;
-    BOOL isLowPower = NO;
-    while (responder) {
-        if ([NSStringFromClass([responder class]) containsString:@"LowPower"]) {
-            isLowPower = YES;
-            break;
-        }
-        responder = responder.nextResponder;
-    }
+    // 判断当前 View Controller 是否是低电量模块
+    NSString *className = NSStringFromClass([self class]);
+    NSString *desc = self.description;
+    
+    if ([className containsString:@"LowPower"] || [desc containsString:@"LowPower"]) {
+        [UIDevice currentDevice].batteryMonitoringEnabled = YES;
+        float level = [UIDevice currentDevice].batteryLevel;
+        if (level < 0) level = 1.0f; // 模拟器或异常时默认全满
 
-    if (isLowPower) {
-        static BOOL hasPrinted = NO;
-        if (!hasPrinted) {
-            hasPrinted = YES;
-            NSLog(@"\n\n================ [LowPower Package Layers] ================");
-            [self cb_dumpLayer:self.layer depth:0];
-            NSLog(@"===========================================================\n\n");
-        }
+        // 遍历找到内部那个电池图案的 UIImageView
+        [self cb_applyBatteryLevel:level toView:self.view];
     }
 }
 
 %new
-- (void)cb_dumpLayer:(CALayer *)layer depth:(int)depth {
-    NSMutableString *indent = [NSMutableString string];
-    for (int i = 0; i < depth; i++) [indent appendString:@"  "];
+- (void)cb_applyBatteryLevel:(float)level toView:(UIView *)view {
+    if (!view) return;
 
-    // 打印 Layer 的类名、Layer Name、Frame 以及 KeyPath 信息
-    NSLog(@"%@├─ Class: %@ | Name: '%@' | Bounds: %@", 
-          indent, 
-          NSStringFromClass([layer class]), 
-          layer.name ? layer.name : @"(null)", 
-          NSStringFromCGRect(layer.bounds));
+    if ([view isKindOfClass:[UIImageView class]]) {
+        UIImageView *imageView = (UIImageView *)view;
+        // 电池图标的 Frame 尺寸通常在 30~36 左右
+        if (imageView.bounds.size.width > 20 && imageView.bounds.size.width < 50) {
+            
+            // 创建一个按真实电量裁剪的 CALayer 作为 Mask
+            CALayer *maskLayer = imageView.layer.mask;
+            if (!maskLayer) {
+                maskLayer = [CALayer layer];
+                maskLayer.backgroundColor = [UIColor blackColor].CGColor;
+                imageView.layer.mask = maskLayer;
+            }
 
-    for (CALayer *sub in layer.sublayers) {
-        [self cb_dumpLayer:sub depth:depth + 1];
+            // 保持高度不变，宽度按真实电量比例 (level) 进行缩放
+            CGRect bounds = imageView.bounds;
+            CGRect maskFrame = CGRectMake(0, 0, bounds.size.width * level, bounds.size.height);
+
+            // 如果处于开关切换瞬间，增加平滑过度动画，跟原生动画保持同步
+            [CATransaction begin];
+            [CATransaction setAnimationDuration:0.25];
+            maskLayer.frame = maskFrame;
+            [CATransaction commit];
+            return;
+        }
+    }
+
+    for (UIView *subview in view.subviews) {
+        [self cb_applyBatteryLevel:level toView:subview];
     }
 }
 
