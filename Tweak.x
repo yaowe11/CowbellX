@@ -26,18 +26,35 @@
         } completionHandler:nil];
     }
 
-    // 3. 屏幕弹窗显示抓取到的图层树
+    // 3. 兼容 iOS 13+ 的 Scene 架构找到顶级 ViewController
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIViewController *rootVC = [UIApplication sharedApplication].keyWindow.rootViewController;
+        UIWindow *window = nil;
+        for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if (scene.activationState == UISceneActivationStateForegroundActive) {
+                for (UIWindow *w in scene.windows) {
+                    if (w.isKeyWindow) {
+                        window = w;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!window) {
+            window = [UIApplication sharedApplication].windows.firstObject;
+        }
+
+        UIViewController *rootVC = window.rootViewController;
         while (rootVC.presentedViewController) {
             rootVC = rootVC.presentedViewController;
         }
         
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"CAPackage 内部图层"
-                                                                       message:hierarchy
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
-        [rootVC presentViewController:alert animated:YES completion:nil];
+        if (rootVC) {
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"CAPackage 内部图层"
+                                                                           message:hierarchy
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
+            [rootVC presentViewController:alert animated:YES completion:nil];
+        }
     });
 }
 
@@ -47,9 +64,11 @@
     
     NSMutableString *result = [NSMutableString string];
     NSMutableString *indent = [NSMutableString string];
-    for (int i = 0; i < depth; i++) [indent appendString:@"  "];
+    for (int i = 0; i < depth; i++) {
+        [indent appendString:@"  "];
+    }
     
-    NSString *layerName = layer.name ? layer.name : @"<無名>";
+    NSString *layerName = layer.name ? layer.name : @"<无名>";
     [result appendFormat:@"%@• %@ (%.0fx%.0f)\n", indent, layerName, layer.bounds.size.width, layer.bounds.size.height];
     
     for (CALayer *sub in layer.sublayers) {
