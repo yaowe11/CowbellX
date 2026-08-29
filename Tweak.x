@@ -17,19 +17,19 @@
         self.userInteractionEnabled = NO;
         self.backgroundColor = [UIColor clearColor];
         
-        // 1. 电量填充块
+        // 1. 电量填充条
         _fillView = [[UIView alloc] init];
         _fillView.layer.cornerRadius = 2.0f;
         _fillView.clipsToBounds = YES;
         [self addSubview:_fillView];
 
-        // 2. 百分比文字（9.3pt Regular）
+        // 2. 下方百分比文字（9.3pt Regular）
         _percentLabel = [[UILabel alloc] init];
         _percentLabel.font = [UIFont systemFontOfSize:9.3f weight:UIFontWeightRegular];
         _percentLabel.textAlignment = NSTextAlignmentCenter;
         [self addSubview:_percentLabel];
 
-        // 3. 监听电量与低电量状态
+        // 3. 监听系统电量及低电量状态
         [UIDevice currentDevice].batteryMonitoringEnabled = YES;
         
         [[NSNotificationCenter defaultCenter] addObserver:self
@@ -72,21 +72,22 @@
     
     self.percentLabel.text = [NSString stringWithFormat:@"%d%%", (int)round(level * 100)];
 
-    // 低电量模式：原生背景会变黄，因此前景色（图标+文字）需设为纯黑；未开启低电量时全白
+    // 诉求3：开启低电量模式后，图标与文字变黄（#FFCC00）；关闭时保持纯白
     BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
-    UIColor *themeColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
+    UIColor *themeColor = isLowPower ? [UIColor colorWithRed:255/255.0 green:204/255.0 blue:0/255.0 alpha:1.0] : [UIColor whiteColor];
     
     self.percentLabel.textColor = themeColor;
     self.fillView.backgroundColor = themeColor;
 
-    // 电池与文字布局参数
-    CGFloat iconW = 34.0f;
+    // 诉求2：电池整体拉长（38.0f）
+    CGFloat iconW = 38.0f;
     CGFloat iconH = 17.0f;
     
+    // 诉求1：电池位置往下移（Y轴真正居中，不再上偏）
     CGFloat iconX = (w - iconW) / 2.0f;
-    CGFloat iconY = (h - iconH) / 2.0f - 2.5f; 
+    CGFloat iconY = (h - iconH) / 2.0f + 1.0f; 
 
-    // 计算内部电量填充条
+    // 计算内部填充宽度
     CGFloat padding = 2.5f;
     CGFloat maxFillW = iconW - (padding * 2) - 3.0f;
     CGFloat currentFillW = maxFillW * level;
@@ -95,8 +96,8 @@
     self.fillView.frame = CGRectMake(iconX + padding, iconY + padding, currentFillW, iconH - (padding * 2));
     self.fillView.layer.cornerRadius = 2.0f;
     
-    // 文字定位在电池正下方 2.5pt 处
-    self.percentLabel.frame = CGRectMake(0, iconY + iconH + 2.5f, w, 11.0f);
+    // 诉求4：百分比文字再往下移（间距从 2.5pt 拉大到 4.5pt）
+    self.percentLabel.frame = CGRectMake(0, iconY + iconH + 4.5f, w, 11.0f);
 }
 
 - (void)drawRect:(CGRect)rect {
@@ -106,15 +107,17 @@
     CGFloat h = self.bounds.size.height;
     if (w <= 0 || h <= 0) return;
 
-    CGFloat iconW = 34.0f;
+    // 参数保持与 layoutSubviews 一致
+    CGFloat iconW = 38.0f;
     CGFloat iconH = 17.0f;
     CGFloat iconX = (w - iconW) / 2.0f;
-    CGFloat iconY = (h - iconH) / 2.0f - 2.5f;
+    CGFloat iconY = (h - iconH) / 2.0f + 1.0f;
 
+    // 诉求3：低电量模式下绘制外框为黄色
     BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
-    UIColor *strokeColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
+    UIColor *strokeColor = isLowPower ? [UIColor colorWithRed:255/255.0 green:204/255.0 blue:0/255.0 alpha:1.0] : [UIColor whiteColor];
 
-    // 绘制电池主体外框
+    // 绘制拉长后的电池主体外框 (宽38.0)
     UIBezierPath *bodyPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX, iconY, iconW - 3.0f, iconH) cornerRadius:5.0f];
     bodyPath.lineWidth = 2.0f;
     [strokeColor setStroke];
@@ -155,12 +158,15 @@
 
     if (!isLowPower) return;
 
-    // 精准清空原生的 CAPackage 矢量绘制，只留下最底层的背景
+    // 1. 彻底清空原生矢量图标
     for (UIView *subview in self.subviews) {
         if (subview.tag != 9999) {
             subview.alpha = 0.0f;
         }
     }
+
+    // 2. 防高亮与防白底：强制将背景保持透明/默认暗色
+    self.backgroundColor = [UIColor clearColor];
 
     CBCustomBatteryView *batteryView = [self viewWithTag:9999];
     if (!batteryView) {
