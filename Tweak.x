@@ -75,7 +75,6 @@
     BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
     UIColor *yellowColor = [UIColor colorWithRed:255/255.0 green:204/255.0 blue:0/255.0 alpha:1.0];
     
-    // 低电量模式：容量变黄，外框/数字%变黑；关闭时全白
     self.percentLabel.textColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
     self.fillView.backgroundColor = isLowPower ? yellowColor : [UIColor whiteColor];
 
@@ -95,7 +94,7 @@
     self.fillView.frame = CGRectMake(iconX + padding, iconY + padding, currentFillW, iconH - (padding * 2));
     self.fillView.layer.cornerRadius = 1.8f;
     
-    // 3. 百分比文字定位（向下微调）
+    // 3. 百分比文字定位
     self.percentLabel.frame = CGRectMake(0, iconY + iconH + 5.5f, w, 11.0f);
 }
 
@@ -114,14 +113,21 @@
     BOOL isLowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled;
     UIColor *strokeColor = isLowPower ? [UIColor blackColor] : [UIColor whiteColor];
 
-    // 绘制电池主体外框
+    // 1. 绘制电池主体外框
     UIBezierPath *bodyPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX, iconY, iconW - 3.0f, iconH) cornerRadius:4.0f];
     bodyPath.lineWidth = 1.4f;
     [strokeColor setStroke];
     [bodyPath stroke];
     
-    // 绘制电池正极 Cap
-    UIBezierPath *capPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(iconX + iconW - 2.5f, iconY + 3.5f, 2.5f, iconH - 7.0f) cornerRadius:1.0f];
+    // 2. 绘制原生质感的电池正极 Cap（右侧带有半圆弧度的小凸起）
+    CGFloat capW = 2.0f;
+    CGFloat capH = 5.0f;
+    CGFloat capX = iconX + iconW - 3.0f;
+    CGFloat capY = iconY + (iconH - capH) / 2.0f;
+    
+    UIBezierPath *capPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(capX, capY, capW, capH)
+                                                  byRoundingCorners:(UIRectCornerTopRight | UIRectCornerBottomRight)
+                                                        cornerRadii:CGSizeMake(1.5f, 1.5f)];
     [strokeColor setFill];
     [capPath fill];
 }
