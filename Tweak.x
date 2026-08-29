@@ -4,6 +4,9 @@
 @interface CCUICAPackageView : UIView
 @property (nonatomic, copy) NSString *packageName;
 - (id)publishedObjectWithName:(NSString *)name;
+
+// 显式声明 %new 方法，解决编译器报错
+- (void)cb_applyLevel:(float)level toLayer:(CALayer *)layer;
 @end
 
 %hook CCUICAPackageView
@@ -35,7 +38,7 @@
     if (level < 0) level = 1.0f;
     if (level < 0.05f) level = 0.05f;
 
-    // 3. 递归遍历，精准寻找并修改内部的电池填充块（只裁切内部，绝不碰极耳和外框）
+    // 3. 递归遍历，精准寻找并修改内部的电池填充块
     [self cb_applyLevel:level toLayer:self.layer];
 }
 
