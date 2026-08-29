@@ -7,7 +7,7 @@
 @property (nonatomic, strong) UILabel *cbPercentLabel;
 - (void)cb_updatePercentText;
 - (BOOL)cb_isLowPowerModule;
-- (void)cb_updateNativeIconFillWithLevel:(float)level inView:(UIView *)parentView;
+- (void)cb_updateNativeBatteryFillInView:(UIView *)parentView level:(float)level;
 @end
 
 %hook CCUIContentModuleContainerView
@@ -37,7 +37,7 @@
         }
     }
 
-    // 3. 保持你调好的百分比 Label 位置（Y轴 height - 22，字体大小 10 Bold）
+    // 3. 完全保留你调好的百分比 Label 布局
     if (!self.cbPercentLabel) {
         UILabel *lab = [[UILabel alloc] initWithFrame:CGRectMake(0, height - 22, width, 12)];
         lab.font = [UIFont systemFontOfSize:10 weight:UIFontWeightBold];
@@ -48,13 +48,13 @@
         [self addSubview:lab];
 
         [UIDevice currentDevice].batteryMonitoringEnabled = YES;
-
+        
         // 监听电量与低电量开关状态
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(cb_updatePercentText)
                                                      name:UIDeviceBatteryLevelDidChangeNotification
                                                    object:nil];
-
+                                                   
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(cb_updatePercentText)
                                                      name:NSProcessInfoPowerStateDidChangeNotification
@@ -72,7 +72,7 @@
 - (BOOL)cb_isLowPowerModule {
     if ([self respondsToSelector:@selector(moduleIdentifier)]) {
         NSString *modID = [self performSelector:@selector(moduleIdentifier)];
-        if ([modID isEqualToString:@"com.apple.control-center.LowPowerModule"] ||
+        if ([modID isEqualToString:@"com.apple.control-center.LowPowerModule"] || 
             [modID containsString:@"LowPowerModule"]) {
             return YES;
         }
@@ -93,11 +93,10 @@
 %new
 - (void)cb_updatePercentText {
     dispatch_async(dispatch_get_main_queue(), ^{
-        // 1. 获取电量数值 (0.0 ~ 1.0)
         float level = [UIDevice currentDevice].batteryLevel;
-        if (level < 0) level = 1.0f; // 防护：未开启或读取失败时按100%算
+        if (level < 0) level = 1.0f;
 
-        // 2. 刷新百分比文字与颜色（保持你原有的文字逻辑）
+        // 1. 获取并刷新电量百分比文字
         if (self.cbPercentLabel) {
             int percent = (int)round(level * 100.0f);
             self.cbPercentLabel.text = [NSString stringWithFormat:@"%d%%", percent];
@@ -110,55 +109,57 @@
             }
         }
 
-        // 3. 让原生的 CA 矢量电池图标按百分比实时填充
-        [self cb_updateNativeIconFillWithLevel:level inView:self];
+        // 2. 递归寻找原生 PackageView 中的电池填充 Layer，并改变其水平缩放
+        [self cb_updateNativeBatteryFillInView:self level:level];
     });
 }
 
 %new
-- (void)cb_updateNativeIconFillWithLevel:(float)level inView:(UIView *)parentView {
+- (void)cb_updateNativeBatteryFillInView:(UIView *)parentView level:(float)level {
     if (!parentView) return;
 
-    // 先尝试通过 CAPackage 系统的 KeyPath 直接注入
-    @try {
-        [parentView.layer setValue:@(level) forKeyPath:@"publishedObjects.fill.strokeEnd"];
-    } @catch (NSException *e) {}
+    // 递归遍历子 View 和 Layer 树
+    for (UIView *subview in parentView.subviews) {
+        if (subview == self.cbPercentLabel) continue;
 
-    // 递归遍历该 View 下的所有 CALayer，精确定位到电池内部的 Fill 图层
-    NSMutableArray *layersToVisit = [NSMutableArray arrayWithObject:parentView.layer];
-    while (layersToVisit.count > 0) {
-        CALayer *currentLayer = [layersToVisit firstObject];
-        [layersToVisit removeObjectAtIndex:0];
-
-        NSString *layerName = currentLayer.name.lowercaseString;
-        
-        // 系统原生低电量 CAPackage 中，内部填充图层的 Name 通常包含 "fill" 或 "level"
-        if (layerName && ([layerName containsString:@"fill"] || [layerName containsString:@"level"]) && ![layerName containsString:@"body"] && ![layerName containsString:@"border"]) {
+        // 找到 CAPackageView 或带有矢量 Layer 的视图
+        if ([NSStringFromClass([subview class]) containsString:@"Package"] || 
+            [NSStringFromClass([subview class]) containsString:@"CCUI"]) {
             
-            // 如果是 CAShapeLayer
-            if ([currentLayer isKindOfClass:[CAShapeLayer class]]) {
-                ((CAShapeLayer *)currentLayer).strokeEnd = level;
-            } else {
-                // 如果是普通 CALayer，调整锚点为左中，进行 X 轴百分比缩放
-                if (currentLayer.anchorPoint.x != 0) {
-                    CGRect oldFrame = currentLayer.frame;
-                    currentLayer.anchorPoint = CGPointMake(0, 0.5);
-                    currentLayer.frame = oldFrame;
+            CALayer *rootLayer = subview.layer;
+            NSMutableArray *queue = [NSMutableArray arrayWithObject:rootLayer];
+
+            while (queue.count > 0) {
+                CALayer *layer = [queue firstObject];
+                [queue removeObjectAtIndex:0];
+
+                // 核心逻辑：iOS 原生电池矢量包中，内部电量填充 Layer 的名字或者子 Layer 必定包含 fill / level / battery
+                NSString *name = layer.name.lowercaseString;
+                if (name && ([name containsString:@"fill"] || [name containsString:@"level"]) && ![name containsString:@"bg"] && ![name containsString:@"border"]) {
+                    
+                    // 1. 如果是路径 shape，直接改 strokeEnd
+                    if ([layer isKindOfClass:[CAShapeLayer class]]) {
+                        ((CAShapeLayer *)layer).strokeEnd = level;
+                    } 
+                    // 2. 如果是普通 CALayer，将左中设为锚点，进行 X 轴缩放
+                    else {
+                        if (layer.anchorPoint.x != 0.0f) {
+                            CGRect oldFrame = layer.frame;
+                            layer.anchorPoint = CGPointMake(0.0f, 0.5f);
+                            layer.frame = oldFrame;
+                        }
+                        layer.transform = CATransform3DMakeScale(level, 1.0f, 1.0f);
+                    }
                 }
-                currentLayer.transform = CATransform3DMakeScale(level, 1.0, 1.0);
+
+                if (layer.sublayers.count > 0) {
+                    [queue addObjectsFromArray:layer.sublayers];
+                }
             }
         }
 
-        if (currentLayer.sublayers.count > 0) {
-            [layersToVisit addObjectsFromArray:currentLayer.sublayers];
-        }
-    }
-
-    // 递归查找子视图（防层级嵌套）
-    for (UIView *subview in parentView.subviews) {
-        if (subview != self.cbPercentLabel) {
-            [self cb_updateNativeIconFillWithLevel:level inView:subview];
-        }
+        // 继续向下递归
+        [self cb_updateNativeBatteryFillInView:subview level:level];
     }
 }
 
