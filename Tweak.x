@@ -8,7 +8,6 @@
 static UIImage *cb_drawBatteryImage(float level, BOOL isSelected) {
     CGSize size = CGSizeMake(28, 14);
     UIGraphicsBeginImageContextWithOptions(size, NO, 0.0);
-    CGContextRef ctx = UIGraphicsGetCurrentContext();
 
     UIColor *tintColor = isSelected ? [UIColor systemYellowColor] : [UIColor whiteColor];
     if (!isSelected) {
@@ -76,10 +75,10 @@ static UIImageView *cb_findImageView(UIView *view) {
     float level = [UIDevice currentDevice].batteryLevel;
     if (level < 0) level = 1.0f;
 
-    // 判断当前低电量模式是否处于开启选中的状态
-    BOOL isSelected = [ProcessInfo processInfo].isLowPowerModeEnabled;
+    // 判断当前低电量模式是否处于开启选中的状态 (修正 ProcessInfo -> NSProcessInfo)
+    BOOL isSelected = [NSProcessInfo processInfo].isLowPowerModeEnabled;
 
-    // 替换为我们精确重绘的实时电量图标
+    // 替换为精确重绘的实时电量图标
     iconView.image = cb_drawBatteryImage(level, isSelected);
 }
 
