@@ -3,7 +3,6 @@
 @interface CCUICAPackageView : UIView
 @property (nonatomic, copy) NSString *packageName;
 
-// 解决编译报错：在此处声明自定义的递归更新方法
 - (void)cb_updateBatteryFillLayerInLayer:(CALayer *)parentLayer batteryLevel:(float)level;
 @end
 
@@ -12,7 +11,7 @@
 - (void)layoutSubviews {
     %orig;
 
-    // 1. 精准识别低电量模式 Toggle，防止误伤其他控制中心图标
+    // 1. 精准识别低电量模式 Toggle
     NSString *pkgName = @"";
     if ([self respondsToSelector:@selector(packageName)]) {
         pkgName = self.packageName ? self.packageName : @"";
@@ -35,22 +34,15 @@
 
     if (!isLowPower) return;
 
-    // 2. 读取系统当前真实电量 (0.0 ~ 1.0)
+    // 2. 读取系统当前真实电量
     [UIDevice currentDevice].batteryMonitoringEnabled = YES;
     float level = [UIDevice currentDevice].batteryLevel;
-    if (level < 0.0f) level = 1.0f; // 模拟器或未获取到时默认按 100% 处理
+    if (level < 0.0f) level = 1.0f;
 
-    // 3. 动态更新系统原生 CAPackage 内部的 CAShapeLayer 填充宽度
+    // 3. 动态更新系统原生 CAPackage 内部填充宽度
     [self cb_updateBatteryFillLayerInLayer:self.layer batteryLevel:level];
 
-    // 4. 整体将 Package 图层向上平移 4pt，给底部的百分比数字留出完美居中空间
-    for (UIView *sub in self.subviews) {
-        if (sub.tag != 8888) {
-            sub.transform = CGAffineTransformMakeTranslation(0, -4.0f);
-        }
-    }
-
-    // 5. 添加/更新底部 Cowbell 风格的百分比 Label
+    // 4. 添加/更新底部百分比 Label（完全不移动系统图标）
     UILabel *label = [self viewWithTag:8888];
     if (!label) {
         label = [[UILabel alloc] init];
@@ -63,4 +55,35 @@
 
     label.text = [NSString stringWithFormat:@"%d%%", (int)(level * 100)];
     CGFloat labelH = 13.0f;
-    label.frame = CGRectMake(0, self.bounds.size.height - labelH
+    label.frame = CGRectMake(0, self.bounds.size.height - labelH - 6.0f, self.bounds.size.width, labelH);
+}
+
+%new
+- (void)cb_updateBatteryFillLayerInLayer:(CALayer *)parentLayer batteryLevel:(float)level {
+    for (CALayer *sublayer in parentLayer.sublayers) {
+        NSString *layerName = sublayer.name ? sublayer.name : @"";
+        
+        if ([sublayer isKindOfClass:[CAShapeLayer class]] && 
+           ([layerName containsString:@"fill"] || [layerName containsString:@"Fill"] || [layerName containsString:@"level"])) {
+            
+            CAShapeLayer *shapeLayer = (CAShapeLayer *)sublayer;
+            CGRect bounds = shapeLayer.bounds;
+            
+            if (bounds.size.width > 0) {
+                CGFloat maxW = bounds.size.width;
+                CGFloat currentW = maxW * level;
+                if (currentW < 1.0f) currentW = 1.0f;
+                
+                CGRect newFillRect = CGRectMake(0, 0, currentW, bounds.size.height);
+                UIBezierPath *newPath = [UIBezierPath bezierPathWithRoundedRect:newFillRect cornerRadius:1.0f];
+                shapeLayer.path = newPath.CGPath;
+            }
+        }
+        
+        if (sublayer.sublayers.count > 0) {
+            [self cb_updateBatteryFillLayerInLayer:sublayer batteryLevel:level];
+        }
+    }
+}
+
+%end
